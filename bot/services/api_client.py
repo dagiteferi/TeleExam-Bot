@@ -33,7 +33,7 @@ class ApiClient:
             async with self._lock:
                 if self._session is None or self._session.closed:
                     self._session = aiohttp.ClientSession(
-                        base_url=settings.BACKEND_URL,
+                        base_url=str(settings.BACKEND_URL),
                         timeout=aiohttp.ClientTimeout(total=15),  # 15 seconds timeout
                     )
         return self._session
@@ -76,7 +76,10 @@ class ApiClient:
             async with session.request(
                 method, path, json=payload, headers=headers
             ) as response:
-                response.raise_for_status()  # Raise an exception for 4xx or 5xx status codes
+                if not response.ok:
+                    text = await response.text()
+                    print(f"API request failed for {method} {path}: {response.status}, message='{text}', payload={payload}")
+                    return None
                 if response.status == 204:  # No Content
                     return None
                 data = await response.json()

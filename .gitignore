@@ -5,11 +5,13 @@ __pycache__/
 *.pyo
 *.egg-info/
 .pytest_cache/
-
+LICENSE
+openapi.json
 # Environments
 
 .env
 venv/
+.venv/
 env/
 
 # IDEs and editors
