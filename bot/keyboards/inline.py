@@ -8,22 +8,17 @@ def question_choices_keyboard(
 ) -> InlineKeyboardMarkup:
     """
     Generates an inline keyboard for multiple-choice question options.
-    Each button's callback data will include the question ID, chosen option, and qtoken.
+    Each option is on its own row. Buttons show only the letter label (A, B, C, D)
+    since the full text is rendered in the question message itself.
     """
-    buttons = []
-    for i, option_text in enumerate(options):
-        # Assuming options are A, B, C, D for choices
-        choice_letter = chr(65 + i)
-        # Callback data format: "answer_{question_id}_{choice_letter}_{qtoken}"
-        callback_data = f"answer_{question_id}_{choice_letter}_{qtoken}"
-        buttons.append(
-            InlineKeyboardButton(text=f"{choice_letter}. {option_text}", callback_data=callback_data)
-        )
-
-    # Arrange buttons in two columns for better display
+    # Each answer on its own row for maximum clarity and readability
     keyboard_rows = []
-    for i in range(0, len(buttons), 2):
-        keyboard_rows.append(buttons[i : i + 2])
+    for i, _ in enumerate(options):
+        choice_letter = chr(65 + i)
+        callback_data = f"ans_{choice_letter}_{qtoken}"
+        keyboard_rows.append([
+            InlineKeyboardButton(text=f"  {choice_letter}  ", callback_data=callback_data)
+        ])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 
@@ -41,25 +36,25 @@ def session_action_keyboard(
     buttons = []
 
     if is_practice_mode and qtoken:
-        # Callback data format: "explain_ai_{session_id}_{qtoken}"
+        # Callback data format: "expai_{qtoken}"
         buttons.append(
             InlineKeyboardButton(
-                text="🧠 Explain with AI", callback_data=f"explain_ai_{session_id}_{qtoken}"
+                text="🧠 Explain with AI", callback_data=f"expai_{qtoken}"
             )
         )
 
     if has_next_question:
-        # Callback data format: "next_question_{session_id}"
+        # Callback data format: "next_{session_id}"
         buttons.append(
             InlineKeyboardButton(
-                text="➡️ Next Question", callback_data=f"next_question_{session_id}"
+                text="➡️ Next Question", callback_data=f"next_{session_id}"
             )
         )
     else:
-        # Callback data format: "end_session_{session_id}"
+        # Callback data format: "end_{session_id}"
         buttons.append(
             InlineKeyboardButton(
-                text="✅ End Session", callback_data=f"end_session_{session_id}"
+                text="✅ End Session", callback_data=f"end_{session_id}"
             )
         )
 
@@ -80,6 +75,59 @@ def department_selection_keyboard(departments: List[dict]) -> InlineKeyboardMark
         callback_data = f"select_dept_{dept['id']}"
         buttons.append(
             InlineKeyboardButton(text=dept["name"].title(), callback_data=callback_data)
+        )
+
+    # Arrange buttons in a single column
+    keyboard_rows = [[button] for button in buttons]
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+
+
+def exam_selection_keyboard(exams: List[dict]) -> InlineKeyboardMarkup:
+    """
+    Generates an inline keyboard for selecting an exam for the chosen department.
+    Each button's callback data will include the exam year and semester.
+    Sorted by year in increasing order.
+    """
+    # Sort exams by year (ascending)
+    # If years are equal, sort by semester (ascending)
+    exams_sorted = sorted(exams, key=lambda x: (x["year"], x["semester"]))
+
+    buttons = []
+    for exam in exams_sorted:
+        exam_id = exam["id"]
+        year = exam["year"]
+        semester = exam["semester"]
+        # Callback data format: "select_exam_{id}_{year}_{semester}" (Max 64 chars)
+        callback_data = f"select_exam_{exam_id}_{year}_{semester}"
+        text = f"{year} - {semester.title()}"
+        buttons.append(
+            InlineKeyboardButton(text=text, callback_data=callback_data)
+        )
+
+    # Arrange buttons in two columns if possible
+    keyboard_rows = []
+    for i in range(0, len(buttons), 2):
+        keyboard_rows.append(buttons[i : i + 2])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+
+
+def course_selection_keyboard(courses: List[dict]) -> InlineKeyboardMarkup:
+    """
+    Generates an inline keyboard for selecting a course for practice mode.
+    Each button's callback data will include the course ID.
+    Sorted alphabetically by name.
+    """
+    # Sort courses by name (ascending)
+    courses_sorted = sorted(courses, key=lambda x: x["name"])
+
+    buttons = []
+    for course in courses_sorted:
+        # Callback data format: "select_course_{course_id}"
+        callback_data = f"select_course_{course['id']}"
+        buttons.append(
+            InlineKeyboardButton(text=course["name"].title(), callback_data=callback_data)
         )
 
     # Arrange buttons in a single column

@@ -14,14 +14,22 @@ router = Router()
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext) -> None:
     """
-    Handles the /start command, fetching available departments for the user to select.
-    The AutoUpsertMiddleware ensures the user is registered in the backend.
+    Handles the /start command, fetching available departments if none selected.
     """
     if not message.from_user:
         return
 
-    # Clear any existing state
-    await state.clear()
+    user_data = await state.get_data()
+    department_id = user_data.get("department_id")
+
+    if department_id:
+        # Already has department, skip straight to menu
+        await message.answer(
+            f"Welcome back, {message.from_user.first_name}! 👋\n\n"
+            "Ready to study today?",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
 
     # Fetch available departments from the backend
     departments = await api_client.get(
@@ -53,27 +61,36 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("select_dept_"), Onboarding.selecting_department)
 async def process_department_selection(callback: CallbackQuery, state: FSMContext) -> None:
     """
-    Processes the user's department selection and transitions to the main menu.
+    Handles department selection, saves to FSM, and confirms to user.
     """
     if not callback.from_user or not callback.message:
         return
 
+    # Always answer callback queries promptly to prevent Telegram timeout
+    await callback.answer()
+
     # Extract department ID from callback data
     dept_id = callback.data.split("_", 2)[2]
-    
-    # Save selection in FSM state
-    await state.update_data(department_id=dept_id)
-    await state.set_state(None) # Clear onboarding state
 
-    await callback.answer("Department selected successfully! ✅")
+    # Save selection in FSM state and persist to backend
+    await state.update_data(department_id=dept_id)
     
-    # Send a confirmation message and show the main menu
-    await callback.message.edit_text(
-        f"Great! You've selected your department. 🎓\n\n"
-        "Now you can take mock exams, practice questions, and use the AI Tutor "
-        "tailored to your field of study."
+    # Explicitly update backend with the new department_id
+    await api_client.post(
+        path="/api/users/upsert",
+        telegram_id=callback.from_user.id,
+        payload={
+            "telegram_id": callback.from_user.id,
+            "department_id": dept_id,
+        },
     )
+    
+    await state.set_state(None)  # Clear onboarding state
+
+    # Update message and show main menu
+    await callback.message.edit_text("Department selected successfully! ✅")
     await callback.message.answer(
-        "What would you like to do today?",
+        "Welcome to TeleExam AI! You can now start practicing or take mock exams. "
+        "Use the menu below to navigate.",
         reply_markup=main_menu_keyboard(),
     )

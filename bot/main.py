@@ -3,12 +3,11 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.fsm.storage.memory import MemoryStorage
-
-# from aiogram.fsm.storage.redis import RedisStorage, DefaultKeyBuilder # For production
+from aiogram.fsm.storage.redis import RedisStorage, DefaultKeyBuilder
 
 from bot.config import settings
 from bot.middlewares.auto_upsert import AutoUpsertMiddleware
+from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.routers.ai_tutor import router as ai_tutor_router
 from bot.routers.onboarding import router as onboarding_router
 from bot.routers.sessions import router as sessions_router
@@ -25,18 +24,17 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     # Initialize Bot with token and HTML parse mode for rich formatting
     bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 
-    # Use MemoryStorage for development, RedisStorage for production
-    storage = MemoryStorage()
-    # For production, uncomment the following lines and configure Redis:
-    # storage = RedisStorage.from_url(
-    #     "redis://localhost:6379/0",
-    #     key_builder=DefaultKeyBuilder(with_bot_id=True, with_destiny=True),
-    # )
+    # Use RedisStorage to persist sessions across bot restarts
+    storage = RedisStorage.from_url(
+        settings.REDIS_URL,
+        key_builder=DefaultKeyBuilder(with_bot_id=True, with_destiny=True),
+    )
 
     dp = Dispatcher(storage=storage)
 
     # Register middlewares to process updates before handlers
     dp.message.middleware(AutoUpsertMiddleware())
+    dp.callback_query.middleware(ThrottlingMiddleware()) # Visual loading and anti-duplication
     dp.callback_query.middleware(AutoUpsertMiddleware())
 
     # Include all defined routers into the dispatcher
