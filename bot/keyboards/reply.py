@@ -16,6 +16,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="📊 My Study Plan"),
             ],
             [
+                KeyboardButton(text="📈 My Progress"),
                 KeyboardButton(text="🔗 Refer & Earn"),
             ],
         ],
