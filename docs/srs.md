@@ -4,7 +4,6 @@
 **Author**: Dagmawi Teferi 
 **Date**: March 30, 2026  
 **Project**: TeleExam AI - Telegram Bot Frontend  
-**Backend**: FastAPI Stateless Monolith (PostgreSQL + Redis + Groq LLMs via LangGraph)  
 **Status**: Final - Approved for Development
 
 ---
@@ -36,6 +35,9 @@ The bot is designed as a **pure presentation layer**. It performs **no education
 - Ethiopian high school and university students
 - Teachers and parents (limited access)
 - Users with basic smartphone and Telegram usage
+
+### 1.4 System Context
+**Backend**: FastAPI Stateless Monolith (PostgreSQL + Redis + Groq LLMs via LangGraph)
 
 ---
 
@@ -141,8 +143,8 @@ The bot must support three distinct session modes:
 ### 3.3 Security (NFR-03)
 - Never expose `BACKEND_URL`, `BOT_TOKEN`, or `BACKEND_SECRET` in logs or code
 - Every backend request must include headers:
-  - `X-Telegram-Secret`
-  - `X-Telegram-Id`
+    - `X-Telegram-Secret`
+    - `X-Telegram-Id`
 - Validate all callback data to prevent tampering
 - Follow least-privilege principle
 
