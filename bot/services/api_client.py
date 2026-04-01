@@ -104,7 +104,7 @@ class ApiClient:
             return None
 
     _cache: Dict[str, Any] = {}
-    _cache_ttl: int = 600 # 10 minutes
+    _cache_ttl: int = 1 # Disable cache for development
 
     async def get(
         self,

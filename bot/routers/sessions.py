@@ -190,7 +190,7 @@ async def start_session_handler(message: Message, state: FSMContext) -> None:
     else:
         # Fetch available courses for the department (Discovery)
         courses = await api_client.get(
-            path="/api/questions/discovery/courses",
+            path=f"/api/questions/discovery/courses?department_id={department_id}",
             telegram_id=message.from_user.id,
         )
 
