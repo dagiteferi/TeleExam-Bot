@@ -31,6 +31,8 @@ class QuestionPayload(BaseModel):
     prompt: Optional[str] = None
     options: List[str]
     qtoken: str
+    year: Optional[int] = None
+    semester: Optional[str] = None
 
 
 class GetQuestionResponse(BaseModel):
@@ -75,8 +77,15 @@ def _format_question_message(question: QuestionPayload, mode: str) -> str:
 
     options_block = "\n\n".join(options_lines)
 
+    # Historical Context (if available)
+    context_footer = ""
+    if question.year and question.semester:
+        context_footer = f"📅 <i>Source: {question.year} - {question.semester.title()}</i>\n"
+
     return (
         f"{header}\n"
+        f"{divider}\n"
+        f"{context_footer}"
         f"{divider}\n\n"
         f"{question_text}\n\n"
         f"{divider}\n\n"
@@ -101,6 +110,14 @@ async def _send_question(
             "Failed to fetch question. Please try again later.",
             reply_markup=main_menu_keyboard(),
         )
+        await state.clear()
+        return
+    # Handle dictionary (error) response or model instance
+    if isinstance(question_wrapped, dict):
+        # Extract error message if present
+        detail = question_wrapped.get("detail", question_wrapped.get("error", {}))
+        msg = detail.get("message") if isinstance(detail, dict) else str(detail)
+        await message.answer(f"⚠️  {msg or 'Unexpected error fetching question.'}")
         await state.clear()
         return
 
@@ -500,9 +517,32 @@ async def end_session_callback(callback: CallbackQuery, state: FSMContext) -> No
         )
         return
 
-    score = submit_data.score
-    total = submit_data.total_questions
-    pct = submit_data.score_percent
+    # Check if we got an error dictionary (e.g. 409 Conflict) or a proper model instance
+    if isinstance(submit_data, dict):
+        # If it's a conflict detail
+        if "error" in submit_data or "detail" in submit_data:
+            detail = submit_data.get("detail", submit_data.get("error", {}))
+            msg = detail.get("message") if isinstance(detail, dict) else str(detail)
+            if "already_submitted" in str(detail):
+                await callback.answer("Your results have already been saved.", show_alert=True)
+                await callback.message.delete()
+                await state.clear()
+                return
+            
+            await callback.message.answer(f"Error finalizing session: {msg}")
+            return
+        
+        # Fallback for raw dict access if validation was skipped
+        score = submit_data.get("score", 0)
+        total = submit_data.get("total_questions", 0)
+        pct = submit_data.get("score_percent", 0.0)
+        msg_text = submit_data.get("message", "Keep learning!")
+    else:
+        # Proper model instance access
+        score = submit_data.score
+        total = submit_data.total_questions
+        pct = submit_data.score_percent
+        msg_text = submit_data.message
 
     if pct >= 80:
         grade_emoji = "🏆"
@@ -530,7 +570,11 @@ async def end_session_callback(callback: CallbackQuery, state: FSMContext) -> No
 
     await callback.message.edit_text(
         result_message,
-        reply_markup=main_menu_keyboard(),
         parse_mode="HTML",
+    )
+    # Send a new message to show the main menu reply keyboard
+    await callback.message.answer(
+        "Use the menu below to start another session:",
+        reply_markup=main_menu_keyboard(),
     )
     await state.clear()
