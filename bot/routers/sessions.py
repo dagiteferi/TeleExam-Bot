@@ -84,8 +84,7 @@ def _format_question_message(question: QuestionPayload, mode: str) -> str:
 
     clarity_link = ""
     if mode == "practice":
-        # Note: Using absolute Telegram deep link to trigger /start with payload
-        # This acts as a text link that can be clicked
+        
         clarity_link = f" or 🧠 <a href='https://t.me/TeleExamAI_bot?start=expai_{question.qtoken}'>Ask AI Clarity</a>"
 
     return (
