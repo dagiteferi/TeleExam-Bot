@@ -98,17 +98,15 @@ def exam_selection_keyboard(exams: List[dict]) -> InlineKeyboardMarkup:
         exam_id = exam["id"]
         year = exam["year"]
         semester = exam["semester"]
-        # Callback data format: "select_exam_{id}_{year}_{semester}" (Max 64 chars)
-        callback_data = f"select_exam_{exam_id}_{year}_{semester}"
+        # Callback data format: "ex_{id}_{year}_{semester}" (Max 64 chars)
+        callback_data = f"ex_{exam_id}_{year}_{semester}"
         text = f"{year} - {semester.title()}"
         buttons.append(
             InlineKeyboardButton(text=text, callback_data=callback_data)
         )
 
-    # Arrange buttons in two columns if possible
-    keyboard_rows = []
-    for i in range(0, len(buttons), 2):
-        keyboard_rows.append(buttons[i : i + 2])
+    # Arrange buttons in a single column so long names like "Hamle Afternoon" don't wrap
+    keyboard_rows = [[button] for button in buttons]
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 

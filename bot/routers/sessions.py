@@ -276,7 +276,7 @@ async def process_course_selection(callback: CallbackQuery, state: FSMContext) -
     await _send_question(callback.message, state, session_id, callback.from_user.id)
 
 
-@router.callback_query(F.data.startswith("select_exam_"), ExamSession.selecting_exam)
+@router.callback_query(F.data.startswith("ex_"), ExamSession.selecting_exam)
 async def process_exam_selection(callback: CallbackQuery, state: FSMContext) -> None:
     """
     Handles selection of a specific exam and starts the session.
@@ -287,12 +287,12 @@ async def process_exam_selection(callback: CallbackQuery, state: FSMContext) -> 
     # Always answer callback queries promptly to prevent Telegram timeout
     await callback.answer()
 
-    # Parse callback data: "select_exam_{id}_{year}_{semester}"
-    parts = callback.data.split("_", 4)
-    if len(parts) != 5:
+    # Parse callback data: "ex_{id}_{year}_{semester}"
+    parts = callback.data.split("_", 3)
+    if len(parts) != 4:
         return
 
-    _, _, exam_id, year, semester = parts
+    _, exam_id, year, semester = parts
     user_data = await state.get_data()
     department_id = user_data.get("department_id")
 
