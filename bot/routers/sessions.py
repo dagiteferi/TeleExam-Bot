@@ -137,7 +137,7 @@ async def _send_question(
     await state.set_state(ExamSession.waiting_for_answer)
 
     keyboard = question_choices_keyboard(
-        question.question_id, question.options, question.qtoken
+        question.question_id, question.options, question.qtoken, is_practice_mode=(mode == "practice")
     )
     import time
     question_text = _format_question_message(question, mode)

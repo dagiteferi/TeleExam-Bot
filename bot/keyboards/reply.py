@@ -25,3 +25,13 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
         one_time_keyboard=False,
     )
     return keyboard
+
+
+def chat_menu_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Generates a simple reply keyboard to end the AI chat session.
+    """
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="🔚 End Chat")]],
+        resize_keyboard=True,
+    )

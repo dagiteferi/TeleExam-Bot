@@ -4,7 +4,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def question_choices_keyboard(
-    question_id: str, options: List[str], qtoken: str
+    question_id: str, options: List[str], qtoken: str, is_practice_mode: bool = False
 ) -> InlineKeyboardMarkup:
     """
     Generates an inline keyboard for multiple-choice question options.
@@ -18,6 +18,11 @@ def question_choices_keyboard(
         callback_data = f"ans_{choice_letter}_{qtoken}"
         keyboard_rows.append([
             InlineKeyboardButton(text=f"  {choice_letter}  ", callback_data=callback_data)
+        ])
+
+    if is_practice_mode:
+        keyboard_rows.append([
+            InlineKeyboardButton(text="🧠 Ask AI Clarity", callback_data=f"expai_{qtoken}")
         ])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)

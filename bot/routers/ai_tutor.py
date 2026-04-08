@@ -3,12 +3,12 @@ from typing import Optional
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
 from pydantic import BaseModel
 
-from bot.keyboards.reply import main_menu_keyboard
+from bot.keyboards.reply import main_menu_keyboard, chat_menu_keyboard
 from bot.services.api_client import api_client
-from bot.states.session_states import AIInteraction
+from bot.states.session_states import AIInteraction, ExamSession
 
 router = Router()
 
@@ -149,10 +149,30 @@ async def explain_ai_callback(callback: CallbackQuery, state: FSMContext) -> Non
     if explanation_data.weak_topic_suggestion:
         explanation_msg += f"\n\n{divider}\n💡 <i>{explanation_data.weak_topic_suggestion}</i>"
 
+    # Keyboard for follow-up
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Ask Follow-up", callback_data="ai_followup")]
+    ])
+
     await callback.message.answer(
         explanation_msg,
         parse_mode="HTML",
         protect_content=True,
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "ai_followup")
+async def ai_followup_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Invoked when user taps 'Ask Follow-up' on an AI explanation."""
+    await callback.answer()
+    await state.set_state(AIInteraction.chatting)
+    await callback.message.answer(
+        "💬 <b>Follow-up Mode</b>\n"
+        "Ask me for any clarification about this question. I'm listening!\n\n"
+        "<i>To continue with your questions, use the button below or type /end_chat.</i>",
+        parse_mode="HTML",
+        reply_markup=chat_menu_keyboard()
     )
 
 
@@ -174,24 +194,48 @@ async def ai_tutor_start_handler(message: Message, state: FSMContext) -> None:
         return
 
     await state.set_state(AIInteraction.chatting)
+    
+    # Check if we have an active session to provide a back button
+    user_data = await state.get_data()
+    session_id = user_data.get("session_id")
+    
+    reply_markup = None
+    if session_id:
+        from bot.keyboards.reply import custom_reply_keyboard # I'll assume I can make one or just use message
+        # For simplicity, I'll just tell them about /end_chat or use a one-off button if I had a reply keyboard helper
+        pass
+
     await message.answer(
         "👋 <b>Hello! I'm your AI Tutor.</b>\n\n"
         "Ask me <b>any question</b> about your studies and I'll help you understand it.\n\n"
-        "<i>Type /end_chat to finish our conversation.</i>",
+        "<i>Use the menu to finish our conversation.</i>",
         parse_mode="HTML",
+        reply_markup=chat_menu_keyboard()
     )
 
 
 @router.message(AIInteraction.chatting, F.text == "/end_chat")
+@router.message(AIInteraction.chatting, F.text == "🔚 End Chat")
 async def ai_tutor_end_handler(message: Message, state: FSMContext) -> None:
     """Ends the AI Tutor chat session."""
     if not message.from_user:
         return
-    await state.set_state(None)  # Return to previous state, not clear all
-    await message.answer(
-        "✅ AI Tutor chat ended.\n\nGood luck with your studies! 🎓",
-        reply_markup=main_menu_keyboard(),
-    )
+    # If user was in a session, return them to active session state
+    user_data = await state.get_data()
+    session_id = user_data.get("session_id")
+    
+    if session_id:
+        await state.set_state(ExamSession.active)
+        await message.answer(
+            "✅ Follow-up ended. You can now continue your session.",
+            # No reply markup here as they should use the inline buttons on the question
+        )
+    else:
+        await state.set_state(None)
+        await message.answer(
+            "✅ AI Tutor chat ended.\n\nGood luck with your studies! 🎓",
+            reply_markup=main_menu_keyboard(),
+        )
 
 
 @router.message(AIInteraction.chatting)
