@@ -1,5 +1,5 @@
 from aiogram import F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -12,11 +12,19 @@ router = Router()
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext) -> None:
+async def cmd_start(message: Message, state: FSMContext, command: CommandObject) -> None:
     """
-    Handles the /start command, fetching available departments if none selected.
+    Handles the /start command, checking for deep link payloads or existing departments.
     """
     if not message.from_user:
+        return
+
+    # Check for deep link payloads (e.g., /start expai_...)
+    payload = command.args
+    if payload and payload.startswith("expai_"):
+        qtoken = payload.split("_", 1)[1]
+        from bot.routers.ai_tutor import handle_ai_explanation
+        await handle_ai_explanation(message, state, qtoken, message.from_user.id)
         return
 
     user_data = await state.get_data()

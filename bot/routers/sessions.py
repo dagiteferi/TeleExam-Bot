@@ -82,6 +82,12 @@ def _format_question_message(question: QuestionPayload, mode: str) -> str:
     if question.year and question.semester:
         context_footer = f"📅 <i>Source: {question.year} - {question.semester.title()}</i>\n"
 
+    clarity_link = ""
+    if mode == "practice":
+        # Note: Using absolute Telegram deep link to trigger /start with payload
+        # This acts as a text link that can be clicked
+        clarity_link = f" or 🧠 <a href='https://t.me/TeleExamAI_bot?start=expai_{question.qtoken}'>Ask AI Clarity</a>"
+
     return (
         f"{header}\n"
         f"{divider}\n"
@@ -91,11 +97,11 @@ def _format_question_message(question: QuestionPayload, mode: str) -> str:
         f"{divider}\n\n"
         f"{options_block}\n\n"
         f"{divider}\n"
-        f"<i>👆 Tap your answer below</i>"
+        f"<i>👆 Tap your answer below{clarity_link}</i>"
     )
 
 
-async def _send_question(
+async def send_question(
     message: Message, state: FSMContext, session_id: str, telegram_id: int
 ) -> None:
     """Helper to fetch and send the next question to the user."""
@@ -137,7 +143,7 @@ async def _send_question(
     await state.set_state(ExamSession.waiting_for_answer)
 
     keyboard = question_choices_keyboard(
-        question.question_id, question.options, question.qtoken, is_practice_mode=(mode == "practice")
+        question.question_id, question.options, question.qtoken
     )
     import time
     question_text = _format_question_message(question, mode)
@@ -273,7 +279,7 @@ async def process_course_selection(callback: CallbackQuery, state: FSMContext) -
 
     await state.update_data(session_id=session_id, mode="practice")
     await state.set_state(ExamSession.active)
-    await _send_question(callback.message, state, session_id, callback.from_user.id)
+    await send_question(callback.message, state, session_id, callback.from_user.id)
 
 
 @router.callback_query(F.data.startswith("ex_"), ExamSession.selecting_exam)
@@ -326,7 +332,7 @@ async def process_exam_selection(callback: CallbackQuery, state: FSMContext) -> 
 
     await state.update_data(session_id=session_id, mode="exam")
     await state.set_state(ExamSession.active)
-    await _send_question(callback.message, state, session_id, callback.from_user.id)
+    await send_question(callback.message, state, session_id, callback.from_user.id)
 
 
 @router.callback_query(F.data.startswith("ans_"), ExamSession.waiting_for_answer)
@@ -472,7 +478,7 @@ async def next_question_callback(callback: CallbackQuery, state: FSMContext) -> 
         )
         return
 
-    await _send_question(callback.message, state, session_id, callback.from_user.id)
+    await send_question(callback.message, state, session_id, callback.from_user.id)
 
 
 @router.callback_query(F.data.startswith("end_"), ExamSession.active)

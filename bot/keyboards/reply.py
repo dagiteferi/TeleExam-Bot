@@ -34,4 +34,5 @@ def chat_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="🔚 End Chat")]],
         resize_keyboard=True,
+        input_field_placeholder="Ask your follow-up questions here..."
     )

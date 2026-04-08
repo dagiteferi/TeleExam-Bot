@@ -93,32 +93,33 @@ def _format_study_plan(plan: StudyPlanDetails) -> str:
 async def explain_ai_callback(callback: CallbackQuery, state: FSMContext) -> None:
     """
     Handles 'Explain with AI' button press after answering a practice question.
-    Parses callback data: 'expai_{qtoken}'
-    Uses question_id stored in FSM state and the answered choice.
     """
     if not callback.message or not callback.from_user:
-        await callback.answer("Error processing request.")
         return
-
     await callback.answer("Generating AI explanation...", show_alert=False)
+    qtoken = callback.data.split("_", 1)[1]
+    await handle_ai_explanation(callback.message, state, qtoken, callback.from_user.id)
 
+
+async def handle_ai_explanation(message: Message, state: FSMContext, qtoken: str, user_id: int) -> None:
+    """Core logic to fetch and display AI explanation, reused by callback and deep link."""
     # Get question context from FSM state
     user_data = await state.get_data()
     question_id = user_data.get("question_id")
 
     if not question_id:
-        await callback.message.answer(
+        await message.answer(
             "❌ Cannot explain — question context lost. Please start a new session.",
             reply_markup=main_menu_keyboard(),
         )
         return
 
     # Show a "thinking" message first for UX
-    thinking_msg = await callback.message.answer("🧠 <i>AI Tutor is thinking...</i>", parse_mode="HTML")
+    thinking_msg = await message.answer("🧠 <i>AI Tutor is thinking...</i>", parse_mode="HTML")
 
     explanation_data = await api_client.post(
         path="/api/ai/explain",
-        telegram_id=callback.from_user.id,
+        telegram_id=user_id,
         payload={
             "question_id": question_id,
             "user_answer": None,  # Backend will use context from the session
@@ -134,7 +135,7 @@ async def explain_ai_callback(callback: CallbackQuery, state: FSMContext) -> Non
         pass
 
     if not explanation_data or not explanation_data.success:
-        await callback.message.answer(
+        await message.answer(
             "⏳ The AI tutor is currently busy. Please try again in a moment.",
             reply_markup=main_menu_keyboard(),
         )
@@ -154,7 +155,7 @@ async def explain_ai_callback(callback: CallbackQuery, state: FSMContext) -> Non
         [InlineKeyboardButton(text="💬 Ask Follow-up", callback_data="ai_followup")]
     ])
 
-    await callback.message.answer(
+    await message.answer(
         explanation_msg,
         parse_mode="HTML",
         protect_content=True,
@@ -225,11 +226,10 @@ async def ai_tutor_end_handler(message: Message, state: FSMContext) -> None:
     session_id = user_data.get("session_id")
     
     if session_id:
+        from bot.routers.sessions import send_question
         await state.set_state(ExamSession.active)
-        await message.answer(
-            "✅ Follow-up ended. You can now continue your session.",
-            # No reply markup here as they should use the inline buttons on the question
-        )
+        await message.answer("✅ Follow-up ended. Resuming your session...")
+        await send_question(message, state, session_id, message.from_user.id)
     else:
         await state.set_state(None)
         await message.answer(
@@ -272,8 +272,11 @@ async def ai_tutor_chat_handler(message: Message, state: FSMContext) -> None:
         )
         return
 
+    divider = "━" * 20
     await message.answer(
-        f"🤖 {ai_response.ai_response}",  # Note: 'ai_response' field, not 'response'
+        f"🤖 {ai_response.ai_response}\n\n"
+        f"{divider}\n"
+        f"<i>Tap 🔚 End Chat or type /end_chat to finish</i>",
         parse_mode="HTML",
         protect_content=True,
     )
