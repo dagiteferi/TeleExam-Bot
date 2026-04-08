@@ -167,6 +167,11 @@ async def handle_ai_explanation(message: Message, state: FSMContext, qtoken: str
 async def ai_followup_callback(callback: CallbackQuery, state: FSMContext) -> None:
     """Invoked when user taps 'Ask Follow-up' on an AI explanation."""
     await callback.answer()
+    
+    # Save the current state so we can return to it later
+    current_state = await state.get_state()
+    await state.update_data(pre_chat_state=current_state)
+    
     await state.set_state(AIInteraction.chatting)
     await callback.message.answer(
         "💬 <b>Follow-up Mode</b>\n"
@@ -194,6 +199,8 @@ async def ai_tutor_start_handler(message: Message, state: FSMContext) -> None:
         )
         return
 
+    current_state = await state.get_state()
+    await state.update_data(pre_chat_state=current_state)
     await state.set_state(AIInteraction.chatting)
     
     # Check if we have an active session to provide a back button
@@ -227,7 +234,14 @@ async def ai_tutor_end_handler(message: Message, state: FSMContext) -> None:
     
     if session_id:
         from bot.routers.sessions import send_question
-        await state.set_state(ExamSession.active)
+        
+        # Restore pre-chat state (e.g. waiting_for_answer or active)
+        pre_chat_state = user_data.get("pre_chat_state")
+        if pre_chat_state:
+            await state.set_state(pre_chat_state)
+        else:
+            await state.set_state(ExamSession.active)
+            
         await message.answer("✅ Follow-up ended. Resuming your session...")
         await send_question(message, state, session_id, message.from_user.id)
     else:

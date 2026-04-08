@@ -140,11 +140,20 @@ async def send_question(
         is_practice=(mode == "practice"),
         question_options=question.options,
     )
-    await state.set_state(ExamSession.waiting_for_answer)
-
-    keyboard = question_choices_keyboard(
-        question.question_id, question.options, question.qtoken
-    )
+    # Restore state or set to waiting_for_answer
+    current_state = await state.get_state()
+    if current_state == ExamSession.active:
+        keyboard = session_action_keyboard(
+            session_id=session_id,
+            has_next_question=has_next,
+            is_practice_mode=(mode == "practice"),
+            qtoken=question.qtoken if mode == "practice" else None
+        )
+    else:
+        await state.set_state(ExamSession.waiting_for_answer)
+        keyboard = question_choices_keyboard(
+            question.question_id, question.options, question.qtoken
+        )
     import time
     question_text = _format_question_message(question, mode)
     # Embed invisible watermark with user's telegram_id for scraper tracing
