@@ -52,7 +52,42 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
 
 if __name__ == "__main__":
     # This block is for local development/testing using polling
+    import platform
+    import sys
+    import aiogram
+    import aiohttp
+    from pprint import pprint
+
+    def mask_secret(value: str, show: int = 4) -> str:
+        if not value or len(value) <= show:
+            return "*" * len(value)
+        return value[:show] + "*" * (len(value) - show)
+
+    def print_startup_details():
+        print("\n========== TeleExam Bot Startup Details ==========")
+        print(f"Python: {platform.python_version()} ({sys.executable})")
+        print(f"Platform: {platform.system()} {platform.release()} ({platform.machine()})")
+        print(f"aiogram: {aiogram.__version__}")
+        print(f"aiohttp: {aiohttp.__version__}")
+        print("\n--- Configuration ---")
+        print(f"BOT_TOKEN: {mask_secret(settings.BOT_TOKEN)}")
+        print(f"BACKEND_URL: {settings.BACKEND_URL}")
+        print(f"BACKEND_SECRET: {mask_secret(settings.BACKEND_SECRET)}")
+        print(f"WEBHOOK_PATH: {settings.WEBHOOK_PATH}")
+        print(f"WEBHOOK_SECRET: {mask_secret(settings.WEBHOOK_SECRET)}")
+        print(f"HOST: {settings.HOST}")
+        print(f"PORT: {settings.PORT}")
+        print(f"REDIS_URL: {settings.REDIS_URL}")
+        print("\n--- Environment Variables ---")
+        import os
+        for k, v in os.environ.items():
+            if any(s in k for s in ["TOKEN", "SECRET"]):
+                v = mask_secret(v)
+            print(f"{k}={v}")
+        print("=================================================\n")
+
     async def start_polling():
+        print_startup_details()
         bot, dp = await get_bot_and_dispatcher()
         print("Bot started in polling mode!")
         await dp.start_polling(bot)
