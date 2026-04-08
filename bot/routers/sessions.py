@@ -84,7 +84,7 @@ def _format_question_message(question: QuestionPayload, mode: str) -> str:
 
     clarity_link = ""
     if mode == "practice":
-        
+
         clarity_link = f" or 🧠 <a href='https://t.me/TeleExamAI_bot?start=expai_{question.qtoken}'>Ask AI Clarity</a>"
 
     return (
