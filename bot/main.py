@@ -32,8 +32,13 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 
    
+    # Clean the URL and ensure it has a scheme
+    redis_url = settings.REDIS_URL.strip()
+    if not redis_url.startswith(("redis://", "rediss://", "unix://")):
+        redis_url = f"redis://{redis_url}"
+
     storage = RedisStorage.from_url(
-        settings.REDIS_URL,
+        redis_url,
         key_builder=DefaultKeyBuilder(with_bot_id=True, with_destiny=True),
     )
 
