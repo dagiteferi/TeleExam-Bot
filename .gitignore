@@ -4,4 +4,31 @@ __pycache__/
 *.pyc
 .vscode/
 .idea/
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+*.egg-info/
+.pytest_cache/
+LICENSE
+openapi.json
+# Environments
+
+.env
+venv/
+.venv/
+env/
+
+# IDEs and editors
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.vscode/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Logs
 *.log
