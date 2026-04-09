@@ -18,7 +18,9 @@ async def on_startup_webhook(dispatcher: Dispatcher, bot: Bot) -> None:
     """
     Sets up the webhook URL for the Telegram bot on startup.
     """
-    webhook_url = f"{settings.BOT_PUBLIC_URL}{settings.WEBHOOK_PATH}"
+    base_url = str(settings.BOT_PUBLIC_URL).rstrip("/")
+    path = settings.WEBHOOK_PATH.lstrip("/")
+    webhook_url = f"{base_url}/{path}"
     logging.info(f"Setting webhook to: {webhook_url}")
     await bot.set_webhook(webhook_url, secret_token=settings.WEBHOOK_SECRET)
     logging.info("Webhook set successfully.")
