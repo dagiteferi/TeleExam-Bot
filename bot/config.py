@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     BOT_TOKEN: str = Field(..., description="Telegram Bot API token")
     BACKEND_URL: HttpUrl = Field(..., description="Base URL of the FastAPI backend")
+    BOT_PUBLIC_URL: HttpUrl = Field(..., description="Public URL of this bot for Telegram webhooks")
     BACKEND_SECRET: str = Field(
         ..., description="Secret key for authenticating with the backend"
     )
