@@ -89,18 +89,25 @@ def exam_selection_keyboard(exams: List[dict]) -> InlineKeyboardMarkup:
     Each button's callback data will include the exam year and semester.
     Sorted by year in increasing order.
     """
-    # Sort exams by year (ascending)
-    # If years are equal, sort by semester (ascending)
-    exams_sorted = sorted(exams, key=lambda x: (x["year"], x["semester"]))
+    # Sort exams by year (descending so newer is at the top)
+    # If years are equal, sort by semester (descending)
+    exams_sorted = sorted(exams, key=lambda x: (x["year"], x["semester"]), reverse=True)
 
     buttons = []
     for exam in exams_sorted:
         exam_id = exam["id"]
         year = exam["year"]
         semester = exam["semester"]
-        # Callback data format: "ex_{id}_{year}_{semester}" (Max 64 chars)
-        callback_data = f"ex_{exam_id}_{year}_{semester}"
-        text = f"{year} - {semester.title()}"
+        is_locked = exam.get("is_locked", False)
+        req_invites = exam.get("required_invites", 1)
+        
+        if is_locked:
+            callback_data = f"locked_ex_{req_invites}"
+            text = f"🔒 {year} - {semester.title()}"
+        else:
+            callback_data = f"ex_{exam_id}_{year}_{semester}"
+            text = f"✅ {year} - {semester.title()}"
+            
         buttons.append(
             InlineKeyboardButton(text=text, callback_data=callback_data)
         )

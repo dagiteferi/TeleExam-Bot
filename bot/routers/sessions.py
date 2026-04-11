@@ -205,6 +205,9 @@ async def start_session_handler(message: Message, state: FSMContext) -> None:
             )
             return
 
+        import logging
+        logging.getLogger(__name__).info(f"============ BOT RECEIVED EXAMS: {exams} ============")
+
         await state.set_state(ExamSession.selecting_exam)
         await message.answer(
             "Select an exam to start:",
@@ -280,6 +283,23 @@ async def process_course_selection(callback: CallbackQuery, state: FSMContext) -
     await state.update_data(session_id=session_id, mode="practice")
     await state.set_state(ExamSession.active)
     await send_question(callback.message, state, session_id, callback.from_user.id)
+
+
+@router.callback_query(F.data.startswith("locked_ex_"), ExamSession.selecting_exam)
+async def process_locked_exam_selection(callback: CallbackQuery, state: FSMContext) -> None:
+    """
+    Handles selection of a locked exam.
+    """
+    # Parse required invites: locked_ex_{req_invites}
+    parts = callback.data.split("_")
+    if len(parts) >= 3:
+        req_invites = parts[2]
+        await callback.answer(
+            f"🔒 This exam is locked! You need {req_invites} more referral(s) to access it. Share your invite link from the main menu!", 
+            show_alert=True
+        )
+    else:
+        await callback.answer("🔒 This exam is locked. Please invite more friends to access it.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("ex_"), ExamSession.selecting_exam)

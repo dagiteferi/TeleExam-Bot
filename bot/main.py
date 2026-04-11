@@ -34,13 +34,22 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 
    
-    # Clean the URL and ensure it has a scheme
-    redis_url = settings.REDIS_URL.strip()
-    if not redis_url.startswith(("redis://", "rediss://", "unix://")):
-        redis_url = f"redis://{redis_url}"
+    # Check Environment and use appropriate REDIS URL
+    if settings.ENVIRONMENT.lower() in ("dev", "development"):
+        logging.info("Development environment detected. Overriding REDIS_URL to DEV_REDIS_URL.")
+        raw_url = settings.DEV_REDIS_URL.strip()
+    else:
+        if not settings.REDIS_URL:
+            raise ValueError("REDIS_URL must be provided in production environment.")
+        raw_url = settings.REDIS_URL.strip()
 
+    # Clean the URL and ensure it has a scheme
+    if not raw_url.startswith(("redis://", "rediss://", "unix://")):
+        raw_url = f"redis://{raw_url}"
+
+        
     storage = RedisStorage.from_url(
-        redis_url,
+        raw_url,
         key_builder=DefaultKeyBuilder(with_bot_id=True, with_destiny=True),
     )
 

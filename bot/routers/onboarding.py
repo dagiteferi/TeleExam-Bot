@@ -105,7 +105,7 @@ async def process_department_selection(callback: CallbackQuery, state: FSMContex
         },
     )
 
-    
+    await state.update_data(department_id=dept_id)
     await state.set_state(None)  # Clear onboarding state
 
     # Update message and show main menu
