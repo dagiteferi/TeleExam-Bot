@@ -89,9 +89,9 @@ def exam_selection_keyboard(exams: List[dict]) -> InlineKeyboardMarkup:
     Each button's callback data will include the exam year and semester.
     Sorted by year in increasing order.
     """
-    # Sort exams by year (descending so newer is at the top)
-    # If years are equal, sort by semester (descending)
-    exams_sorted = sorted(exams, key=lambda x: (x["year"], x["semester"]), reverse=True)
+    # Sort exams by year (ascending so oldest is at the top, newest at the bottom)
+    # If years are equal, sort by semester (ascending)
+    exams_sorted = sorted(exams, key=lambda x: (x["year"], x["semester"]), reverse=False)
 
     buttons = []
     for exam in exams_sorted:

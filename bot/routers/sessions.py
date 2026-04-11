@@ -295,7 +295,7 @@ async def process_locked_exam_selection(callback: CallbackQuery, state: FSMConte
     if len(parts) >= 3:
         req_invites = parts[2]
         await callback.answer(
-            f"🔒 This exam is locked! You need {req_invites} more referral(s) to access it. Share your invite link from the main menu!", 
+            f"🔒 This exam is locked! You need a total of {req_invites} referrals to unlock it. Share your invite link from the main menu!", 
             show_alert=True
         )
     else:
