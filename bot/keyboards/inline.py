@@ -132,3 +132,13 @@ def course_selection_keyboard(courses: List[dict]) -> InlineKeyboardMarkup:
     keyboard_rows = [[button] for button in buttons]
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+
+def pro_plan_keyboard() -> InlineKeyboardMarkup:
+    """
+    Generates an inline keyboard to promote the PRO plan.
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💎 Upgrade to PRO", callback_data="buy_pro")],
+        [InlineKeyboardButton(text="📞 Contact Support", url="https://t.me/your_support_handle")]
+    ])
+

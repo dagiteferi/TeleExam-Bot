@@ -345,12 +345,18 @@ async def my_study_plan_handler(message: Message, state: FSMContext) -> None:
             "I can generate your personalized study plan.\n\n"
             "📚 Go to <b>Take Exam</b> → select any year → finish all questions."
         )
+        
+        from bot.keyboards.inline import pro_plan_keyboard
+        # If the message contains "Upgrade to PRO", show the pro keyboard
+        reply_markup = pro_plan_keyboard() if "Upgrade to PRO" in prereq_msg else main_menu_keyboard()
+        
         await message.answer(
             f"ℹ️ {prereq_msg}",
             parse_mode="HTML",
-            reply_markup=main_menu_keyboard(),
+            reply_markup=reply_markup,
         )
         return
+
 
     formatted = _format_study_plan(study_plan_data.study_plan)
     await message.answer(

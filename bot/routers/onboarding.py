@@ -19,13 +19,19 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     if not message.from_user:
         return
 
-    # Check for deep link payloads (e.g., /start expai_...)
+    # Check for deep link payloads (e.g., /start expai_... or /start ref_...)
     payload = command.args
-    if payload and payload.startswith("expai_"):
-        qtoken = payload.split("_", 1)[1]
-        from bot.routers.ai_tutor import handle_ai_explanation
-        await handle_ai_explanation(message, state, qtoken, message.from_user.id)
-        return
+    if payload:
+        if payload.startswith("expai_"):
+            qtoken = payload.split("_", 1)[1]
+            from bot.routers.ai_tutor import handle_ai_explanation
+            await handle_ai_explanation(message, state, qtoken, message.from_user.id)
+            return
+        elif payload.startswith("ref_"):
+            ref_code = payload.split("_", 1)[1]
+            await state.update_data(temp_ref_code=ref_code)
+            # We'll use this ref_code during the first upsert (department selection)
+
 
     user_data = await state.get_data()
     department_id = user_data.get("department_id")
@@ -81,17 +87,24 @@ async def process_department_selection(callback: CallbackQuery, state: FSMContex
     dept_id = callback.data.split("_", 2)[2]
 
     # Save selection in FSM state and persist to backend
-    await state.update_data(department_id=dept_id)
-    
-    # Explicitly update backend with the new department_id
+    # Extract temp_ref_code if it exists
+    user_data = await state.get_data()
+    ref_code = user_data.get("temp_ref_code")
+
+    # Explicitly update backend with the new department_id and any referral code
     await api_client.post(
         path="/api/users/upsert",
         telegram_id=callback.from_user.id,
         payload={
             "telegram_id": callback.from_user.id,
             "department_id": dept_id,
+            "ref_code": ref_code,
+            "first_name": callback.from_user.first_name,
+            "last_name": callback.from_user.last_name,
+            "telegram_username": callback.from_user.username,
         },
     )
+
     
     await state.set_state(None)  # Clear onboarding state
 

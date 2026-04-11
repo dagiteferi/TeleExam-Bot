@@ -12,7 +12,9 @@ from bot.routers.ai_tutor import router as ai_tutor_router
 from bot.routers.onboarding import router as onboarding_router
 from bot.routers.progress import router as progress_router
 from bot.routers.sessions import router as sessions_router
+from bot.routers.referral import router as referral_router
 from bot.services.api_client import api_client
+
 
 
 import platform
@@ -54,6 +56,8 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     dp.include_router(sessions_router)
     dp.include_router(ai_tutor_router)
     dp.include_router(progress_router)
+    dp.include_router(referral_router)
+
 
     dp.shutdown.register(api_client.close_session)
 
