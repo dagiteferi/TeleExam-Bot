@@ -135,8 +135,10 @@ async def handle_ai_explanation(message: Message, state: FSMContext, qtoken: str
         pass
 
     if not explanation_data or not explanation_data.success:
+        # If the backend sent a specific explanation (like a Paywall/Pro message), display it
+        error_msg = explanation_data.explanation if explanation_data and explanation_data.explanation else "⏳ The AI tutor is currently busy. Please try again in a moment."
         await message.answer(
-            "⏳ The AI tutor is currently busy. Please try again in a moment.",
+            error_msg,
             reply_markup=main_menu_keyboard(),
         )
         return
@@ -280,9 +282,8 @@ async def ai_tutor_chat_handler(message: Message, state: FSMContext) -> None:
         pass
 
     if not ai_response or not ai_response.success:
-        await message.answer(
-            "⏳ My AI brain is a bit busy right now. Please try again in a moment."
-        )
+        error_msg = ai_response.ai_response if ai_response and ai_response.ai_response else "⏳ My AI brain is a bit busy right now. Please try again in a moment."
+        await message.answer(error_msg)
         return
 
     divider = "━" * 20
