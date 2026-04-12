@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from pydantic import BaseModel
 
 from bot.keyboards.inline import (
@@ -234,6 +234,51 @@ async def start_session_handler(message: Message, state: FSMContext) -> None:
         )
 
 
+@router.callback_query(F.data.startswith("locked_course_"))
+async def process_locked_course_selection(callback: CallbackQuery) -> None:
+    """
+    Handles selection of a locked course — shows a persistent message with invite link.
+    """
+    if not callback.from_user or not callback.message:
+        await callback.answer()
+        return
+
+    await callback.answer()  # Dismiss the loading spinner immediately
+
+    parts = callback.data.split("_")
+    req_invites = parts[2] if len(parts) >= 3 else "a few"
+
+    # Fetch user's referral info to get their personal invite link
+    user_data = await api_client.post(
+        path="/api/users/upsert",
+        telegram_id=callback.from_user.id,
+        payload={"telegram_id": callback.from_user.id},
+    )
+
+    invite_code = user_data.get("invite_code") if user_data else None
+    invite_count = user_data.get("invite_count", 0) if user_data else 0
+    bot_link = f"https://t.me/TeleExamAI_bot?start=ref_{invite_code}" if invite_code else "https://t.me/TeleExamAI_bot"
+    share_url = f"https://t.me/share/url?url={bot_link}&text=Study%20better%20with%20TeleExam%20AI!%20Access%20past%20exams%20now."
+
+    text = (
+        "🔒  <b>This Course is Locked</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"You need <b>{req_invites} total invite(s)</b> to unlock all practice courses.\n"
+        f"📊  Your current invites: <b>{invite_count}</b>\n\n"
+        "👇  <b>Share your invite link with friends to unlock this content:</b>\n"
+        f"<code>{bot_link}</code>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>Every friend who joins via your link counts as one invite!</i>"
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Share Invite Link", url=share_url)],
+        [InlineKeyboardButton(text="⬅️ Back to Courses", callback_data="back_to_courses")],
+    ])
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+
 @router.callback_query(F.data.startswith("select_course_"), ExamSession.selecting_course)
 async def process_course_selection(callback: CallbackQuery, state: FSMContext) -> None:
     """
@@ -285,21 +330,125 @@ async def process_course_selection(callback: CallbackQuery, state: FSMContext) -
     await send_question(callback.message, state, session_id, callback.from_user.id)
 
 
-@router.callback_query(F.data.startswith("locked_ex_"), ExamSession.selecting_exam)
-async def process_locked_exam_selection(callback: CallbackQuery, state: FSMContext) -> None:
+@router.callback_query(F.data.startswith("locked_ex_"))
+async def process_locked_exam_selection(callback: CallbackQuery) -> None:
     """
-    Handles selection of a locked exam.
+    Handles selection of a locked exam — shows a persistent message with invite link.
     """
-    # Parse required invites: locked_ex_{req_invites}
+    if not callback.from_user or not callback.message:
+        await callback.answer()
+        return
+
+    await callback.answer()  # Dismiss the loading spinner immediately
+
     parts = callback.data.split("_")
-    if len(parts) >= 3:
-        req_invites = parts[2]
-        await callback.answer(
-            f"🔒 This exam is locked! You need a total of {req_invites} referrals to unlock it. Share your invite link from the main menu!", 
-            show_alert=True
+    req_invites = parts[2] if len(parts) >= 3 else "a few"
+
+    # Fetch user's referral info to get their personal invite link
+    user_data = await api_client.post(
+        path="/api/users/upsert",
+        telegram_id=callback.from_user.id,
+        payload={"telegram_id": callback.from_user.id},
+    )
+
+    invite_code = user_data.get("invite_code") if user_data else None
+    invite_count = user_data.get("invite_count", 0) if user_data else 0
+    bot_link = f"https://t.me/TeleExamAI_bot?start=ref_{invite_code}" if invite_code else "https://t.me/TeleExamAI_bot"
+    share_url = f"https://t.me/share/url?url={bot_link}&text=Study%20better%20with%20TeleExam%20AI!%20Access%20past%20exams%20now."
+
+    text = (
+        "🔒  <b>This Exam Year is Locked</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"You need <b>{req_invites} invite(s)</b> to unlock this exam year.\n"
+        f"📊  Your current invites: <b>{invite_count}</b>\n\n"
+        "👇  <b>Share your invite link with friends to unlock this content:</b>\n"
+        f"<code>{bot_link}</code>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>Every friend who joins via your link counts as one invite!</i>"
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Share Invite Link", url=share_url)],
+        [InlineKeyboardButton(text="⬅️ Back to Exams", callback_data="back_to_exams")],
+    ])
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "back_to_courses")
+async def back_to_courses_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    """
+    Returns the user to the course selection list after dismissing the locked screen.
+    """
+    if not callback.from_user or not callback.message:
+        await callback.answer()
+        return
+
+    await callback.answer()
+
+    user_data = await state.get_data()
+    department_id = user_data.get("department_id")
+
+    if not department_id:
+        await callback.message.edit_text(
+            "⚠️ Could not find your department. Please use /start to set it up again."
         )
-    else:
-        await callback.answer("🔒 This exam is locked. Please invite more friends to access it.", show_alert=True)
+        return
+
+    courses = await api_client.get(
+        path=f"/api/questions/discovery/courses?department_id={department_id}",
+        telegram_id=callback.from_user.id,
+    )
+
+    if not courses:
+        await callback.message.edit_text(
+            "No courses found for your department. Please try again later."
+        )
+        return
+
+    await state.set_state(ExamSession.selecting_course)
+    await callback.message.edit_text(
+        "Select a course to practice:",
+        reply_markup=course_selection_keyboard(courses),
+    )
+
+
+@router.callback_query(F.data == "back_to_exams")
+async def back_to_exams_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    """
+    Returns the user to the exam selection list after dismissing the locked screen.
+    """
+    if not callback.from_user or not callback.message:
+        await callback.answer()
+        return
+
+    await callback.answer()
+
+    user_data = await state.get_data()
+    department_id = user_data.get("department_id")
+
+    if not department_id:
+        await callback.message.edit_text(
+            "⚠️ Could not find your department. Please use /start to set it up again."
+        )
+        return
+
+    exams = await api_client.get(
+        path=f"/api/questions/discovery/department/{department_id}/exams",
+        telegram_id=callback.from_user.id,
+    )
+
+    if not exams:
+        await callback.message.edit_text(
+            "No exams found for your department. Please try again later."
+        )
+        return
+
+    await state.set_state(ExamSession.selecting_exam)
+    await callback.message.edit_text(
+        "Select an exam to start:",
+        reply_markup=exam_selection_keyboard(exams),
+    )
 
 
 @router.callback_query(F.data.startswith("ex_"), ExamSession.selecting_exam)

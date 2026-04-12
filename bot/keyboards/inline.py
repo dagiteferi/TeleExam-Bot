@@ -120,20 +120,22 @@ def exam_selection_keyboard(exams: List[dict]) -> InlineKeyboardMarkup:
 
 def course_selection_keyboard(courses: List[dict]) -> InlineKeyboardMarkup:
     """
-    Generates an inline keyboard for selecting a course for practice mode.
-    Each button's callback data will include the course ID.
-    Sorted alphabetically by name.
+    Generates an inline keyboard for selecting a specific course.
     """
-    # Sort courses by name (ascending)
-    courses_sorted = sorted(courses, key=lambda x: x["name"])
-
     buttons = []
-    for course in courses_sorted:
-        # Callback data format: "select_course_{course_id}"
-        callback_data = f"select_course_{course['id']}"
-        buttons.append(
-            InlineKeyboardButton(text=course["name"].title(), callback_data=callback_data)
-        )
+    for course in courses:
+        course_id = course["id"]
+        is_locked = course.get("is_locked", False)
+        req_invites = course.get("required_invites", 4)
+        
+        if is_locked:
+            callback_data = f"locked_course_{req_invites}"
+            text = f"🔒 {course['name'].title()}"
+        else:
+            callback_data = f"select_course_{course_id}"
+            text = f"✅ {course['name'].title()}"
+            
+        buttons.append(InlineKeyboardButton(text=text, callback_data=callback_data))
 
     # Arrange buttons in a single column
     keyboard_rows = [[button] for button in buttons]
