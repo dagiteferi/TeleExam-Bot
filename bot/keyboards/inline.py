@@ -27,6 +27,7 @@ def session_action_keyboard(
     session_id: str,
     has_next_question: bool,
     is_practice_mode: bool,
+    question_id: Optional[str] = None,
     qtoken: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     """
@@ -39,9 +40,15 @@ def session_action_keyboard(
         # Callback data format: "expai_{qtoken}"
         buttons.append(
             InlineKeyboardButton(
-                text=" Ask AI Tutor", callback_data=f"expai_{qtoken}"
+                text="🤖 Ask AI Tutor", callback_data=f"expai_{qtoken}"
             )
         )
+        if question_id:
+            buttons.append(
+                InlineKeyboardButton(
+                    text="🔖 Save Question", callback_data=f"bmk_{question_id}"
+                )
+            )
 
     if has_next_question:
         # Callback data format: "next_{session_id}"

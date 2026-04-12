@@ -596,6 +596,7 @@ async def process_answer_callback(callback: CallbackQuery, state: FSMContext) ->
             session_id=session_id,
             has_next_question=user_data.get("has_next", False),
             is_practice_mode=is_practice,
+            question_id=question_id,
             qtoken=qtoken if is_practice else None,
         ),
         parse_mode="HTML",
@@ -746,3 +747,86 @@ async def end_session_callback(callback: CallbackQuery, state: FSMContext) -> No
         reply_markup=main_menu_keyboard(),
     )
     await state.clear()
+
+
+@router.callback_query(F.data.startswith("bmk_"))
+async def toggle_bookmark_callback(callback: CallbackQuery) -> None:
+    """Handles the 'Save Question' button."""
+    if not callback.from_user or not callback.message:
+        return
+        
+    question_id = callback.data.split("_")[1]
+    
+    # Show loading
+    await callback.answer("Saving question...", show_alert=False)
+    
+    response_data = await api_client.post(
+        path=f"/api/bookmarks/{question_id}",
+        telegram_id=callback.from_user.id,
+        payload={}
+    )
+    
+    if response_data and response_data.get("success"):
+        await callback.answer(response_data.get("message", "🔖 Question Saved!"), show_alert=True)
+    else:
+        await callback.answer("Failed to save question. Try again.", show_alert=True)
+
+
+@router.message(F.text == "📁 Saved Questions")
+async def view_bookmarks_handler(message: Message, state: FSMContext) -> None:
+    """Displays user's saved questions."""
+    if not message.from_user:
+        return
+        
+    thinking = await message.answer("<i>Loading your saved questions...</i>", parse_mode="HTML")
+    
+    # Get bookmarks from backend
+    data = await api_client.get(
+        path="/api/bookmarks",
+        telegram_id=message.from_user.id
+    )
+    
+    try:
+        await thinking.delete()
+    except:
+        pass
+        
+    if not data or not data.get("items"):
+        await message.answer(
+            "You don't have any saved questions yet.\n\n"
+            "While in <b>Practice Mode</b>, tap <b>🔖 Save Question</b> to bookmark difficult questions here for later review!",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard()
+        )
+        return
+        
+    items = data.get("items", [])
+    
+    # Format bookmarks nicely (send a few as rich text, limit to 5 per message to avoid floods)
+    await message.answer(f"📚 <b>Your Saved Questions</b> ({len(items)} total)\n\n<i>Here are your most recently saved questions. Review them carefully!</i>", parse_mode="HTML")
+    
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    
+    for i, item in enumerate(items[:5]): # Show up to 5 latest
+        prompt = item.get("prompt", "Question text unavailable")
+        correct = item.get("correct_choice")
+        
+        # Build block
+        block = f"<b>Q:</b> {prompt}\n\n"
+        if item.get("choice_a"): block += f"A) {item['choice_a']}\n"
+        if item.get("choice_b"): block += f"B) {item['choice_b']}\n"
+        if item.get("choice_c"): block += f"C) {item['choice_c']}\n"
+        if item.get("choice_d"): block += f"D) {item['choice_d']}\n"
+        
+        block += f"\n🏆 <b>Correct Answer:</b> {correct}"
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text="❌ Remove Bookmark", callback_data=f"bmk_{item['question_id']}")
+        
+        await message.answer(block, parse_mode="HTML", reply_markup=builder.as_markup())
+        
+    if len(items) > 5:
+        await message.answer(f"<i>...and {len(items)-5} more. Unsave older ones to see them here!</i>", parse_mode="HTML")
+
+
+

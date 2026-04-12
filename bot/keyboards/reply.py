@@ -16,6 +16,9 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="📊 My Progress"),
                 KeyboardButton(text="🤝 Invite Friends"),
             ],
+            [
+                KeyboardButton(text="📁 Saved Questions"),
+            ]
         ],
         resize_keyboard=True,
         is_persistent=True,
