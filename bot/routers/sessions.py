@@ -60,7 +60,7 @@ def _format_question_message(question: QuestionPayload, mode: str) -> str:
     """Formats question text with number, choices, and mode badge."""
     q_num = question.index + 1
     q_total = question.total
-    mode_icon = "📚" if mode == "exam" else "📝"
+    mode_icon = "📋" if mode == "exam" else "✏️"
 
     # Header line: progress and mode
     header = f"{mode_icon}  <b>Question {q_num} of {q_total}</b>"
@@ -80,12 +80,11 @@ def _format_question_message(question: QuestionPayload, mode: str) -> str:
     # Historical Context (if available)
     context_footer = ""
     if question.year and question.semester:
-        context_footer = f"📅 <i>Source: {question.year} - {question.semester.title()}</i>\n"
+        context_footer = f"<i>Source: {question.year} - {question.semester.title()}</i>\n"
 
     clarity_link = ""
     if mode == "practice":
-
-        clarity_link = f" or 🧠 <a href='https://t.me/TeleExamAI_bot?start=expai_{question.qtoken}'>Ask AI Clarity</a>"
+        clarity_link = f" or <a href='https://t.me/TeleExamAI_bot?start=expai_{question.qtoken}'>Ask AI Tutor</a>"
 
     return (
         f"{header}\n"
@@ -161,8 +160,8 @@ async def send_question(
     )
 
 
-@router.message(F.text == "📚 Take Exam")
-@router.message(F.text == "📝 Practice Questions")
+@router.message(F.text == "📝 Exam Mode")
+@router.message(F.text == "🎯 Practice Mode")
 async def start_session_handler(message: Message, state: FSMContext) -> None:
     """
     Handles starting a new exam or practice session based on user's menu choice.
@@ -171,9 +170,9 @@ async def start_session_handler(message: Message, state: FSMContext) -> None:
         return
 
     mode: Literal["exam", "practice"]
-    if message.text == "📚 Take Exam":
+    if message.text == "📝 Exam Mode":
         mode = "exam"
-    elif message.text == "📝 Practice Questions":
+    elif message.text == "🎯 Practice Mode":
         mode = "practice"
     else:
         await message.answer("Invalid session type. Please choose from the menu.")
@@ -200,7 +199,7 @@ async def start_session_handler(message: Message, state: FSMContext) -> None:
 
         if not exams:
             await message.answer(
-                "Currently, there are no mock exams available for your department.",
+                "Currently, there are no exams available for your department.",
                 reply_markup=main_menu_keyboard(),
             )
             return
@@ -563,25 +562,23 @@ async def process_answer_callback(callback: CallbackQuery, state: FSMContext) ->
 
     if is_practice:
         if answer_data.is_correct:
-            result_line = f"✅  <b>Correct!</b>"
-            selected_line = f"You chose <b>{choice})</b>  {selected_text}"
-            result_block = f"{result_line}\n{selected_line}"
+            result_block = f"✅ <b>Correct!</b>\nYou chose <b>{choice})</b> {selected_text}"
         else:
             correct_letter = answer_data.correct_choice or "?"
-            # Find correct option text
             correct_index = ord(correct_letter) - 65 if len(correct_letter) == 1 else -1
             correct_text = question_options[correct_index] if 0 <= correct_index < len(question_options) else correct_letter
-            result_line = f"❌  <b>Incorrect</b>"
-            selected_line = f"You chose <b>{choice})</b>  <s>{selected_text}</s>"
-            correct_line = f"Correct answer: <b>{correct_letter})</b>  {correct_text}"
-            result_block = f"{result_line}\n{selected_line}\n{correct_line}"
+            result_block = (
+                f"❌ <b>Incorrect</b>\n"
+                f"You chose <b>{choice})</b> <s>{selected_text}</s>\n"
+                f"Correct answer: <b>{correct_letter})</b> {correct_text}"
+            )
 
         if answer_data.explanation:
-            explanation_block = f"\n{divider}\n💡  <b>Explanation</b>\n{answer_data.explanation}"
+            explanation_block = f"\n{divider}\n<b>Explanation</b>\n{answer_data.explanation}"
         else:
             explanation_block = ""
     else:
-        result_block = f"📌  Answer <b>{choice}</b> submitted."
+        result_block = f"Answer <b>{choice}</b> submitted."
         explanation_block = ""
 
     # Reconstruct the full message to keep question context visible
@@ -720,25 +717,21 @@ async def end_session_callback(callback: CallbackQuery, state: FSMContext) -> No
         msg_text = submit_data.message
 
     if pct >= 80:
-        grade_emoji = "🏆"
-        grade_label = "Excellent!"
+        grade_label = "Excellent Performance"
     elif pct >= 60:
-        grade_emoji = "👍"
-        grade_label = "Good job!"
+        grade_label = "Good Effort"
     elif pct >= 40:
-        grade_emoji = "📖"
-        grade_label = "Keep studying!"
+        grade_label = "Needs Improvement"
     else:
-        grade_emoji = "💪"
-        grade_label = "Don't give up!"
+        grade_label = "Review Recommended"
 
     divider = "━" * 30
     result_message = (
-        f"🎓  <b>Session Complete!</b>\n"
+        f"<b>Session Summary</b>\n"
         f"{divider}\n\n"
-        f"{grade_emoji}  <b>{grade_label}</b>\n\n"
-        f"📊  Score:  <b>{score} / {total}</b>\n"
-        f"📈  Percentage:  <b>{pct:.1f}%</b>\n\n"
+        f"<b>{grade_label}</b>\n\n"
+        f"Score: <b>{score} / {total}</b>\n"
+        f"Accuracy: <b>{pct:.1f}%</b>\n\n"
         f"{divider}\n"
         f"<i>{submit_data.message}</i>"
     )

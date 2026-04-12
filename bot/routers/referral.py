@@ -5,7 +5,7 @@ from bot.config import settings
 
 router = Router()
 
-@router.message(F.text == "🔗 Refer & Earn")
+@router.message(F.text == "🤝 Invite Friends")
 async def referral_dashboard(message: Message):
     if not message.from_user:
         return
@@ -34,25 +34,23 @@ async def referral_dashboard(message: Message):
     
     # 4-Invite Journey Description
     journey = (
-        "🎁 **Refer & Earn Program**\n"
+        "<b>Referral Program</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "Help your friends excel and unlock premium content!\n\n"
-        f"📊 Your Total Invites: **{invite_count}**\n\n"
-        "🤖 **AI Tutor:** Everyone gets **5 free sessions**! To use AI fully, upgrade to a **PRO Plan**.\n\n"
-        "🚀 **Content Unlock Journey:**\n"
-        "• **Invite 1:** Unlock 2nd Year of exams\n"
-        "• **Invite 2:** Unlock 3rd Year of exams\n"
-        "• **Invite 3:** Unlock 4th Year of exams\n"
-        "• **Invite 4:** 🔓 **FULL UNLOCK** (Access ALL years of exams)\n\n"
+        "Invite your peers to study together and unlock advanced content.\n\n"
+        f"Total Referrals: <b>{invite_count}</b>\n\n"
+        "<b>Content Unlock Sequence:</b>\n"
+        "• <b>1 Referral:</b> Unlocks 2nd Year of exams\n"
+        "• <b>2 Referrals:</b> Unlocks 3rd Year of exams\n"
+        "• <b>3 Referrals:</b> Unlocks 4th Year of exams\n"
+        "• <b>4 Referrals:</b> Full Access to all exams and practice materials\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
-
-        "👇 **Your Unique Invite Link:**\n"
-        f"`{bot_link}`\n\n"
-        "*Tap the link to copy it, then share it with your study groups!*"
+        "<b>Your Unique Invite Link:</b>\n"
+        f"<code>{bot_link}</code>\n\n"
+        "<i>Tap the link to copy it, then share it with your study groups.</i>"
     )
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📢 Share Link", url=f"https://t.me/share/url?url={bot_link}&text=Study%20better%20with%20TeleExam%20AI!%20Unlocking%20years%20of%20past%20exams%20now.")]
+        [InlineKeyboardButton(text="Share Link", url=f"https://t.me/share/url?url={bot_link}&text=Study%20better%20with%20TeleExam%20AI!%20Unlocking%20years%20of%20past%20exams%20now.")]
     ])
 
-    await message.answer(journey, parse_mode="Markdown", reply_markup=keyboard)
+    await message.answer(journey, parse_mode="HTML", reply_markup=keyboard)

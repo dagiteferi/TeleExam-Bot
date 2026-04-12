@@ -39,7 +39,7 @@ def session_action_keyboard(
         # Callback data format: "expai_{qtoken}"
         buttons.append(
             InlineKeyboardButton(
-                text="🧠 Explain with AI", callback_data=f"expai_{qtoken}"
+                text=" Ask AI Tutor", callback_data=f"expai_{qtoken}"
             )
         )
 
@@ -54,7 +54,7 @@ def session_action_keyboard(
         # Callback data format: "end_{session_id}"
         buttons.append(
             InlineKeyboardButton(
-                text="✅ End Session", callback_data=f"end_{session_id}"
+                text="End Session", callback_data=f"end_{session_id}"
             )
         )
 
@@ -106,7 +106,7 @@ def exam_selection_keyboard(exams: List[dict]) -> InlineKeyboardMarkup:
             text = f"🔒 {year} - {semester.title()}"
         else:
             callback_data = f"ex_{exam_id}_{year}_{semester}"
-            text = f"✅ {year} - {semester.title()}"
+            text = f"{year} - {semester.title()}"
             
         buttons.append(
             InlineKeyboardButton(text=text, callback_data=callback_data)
@@ -133,7 +133,7 @@ def course_selection_keyboard(courses: List[dict]) -> InlineKeyboardMarkup:
             text = f"🔒 {course['name'].title()}"
         else:
             callback_data = f"select_course_{course_id}"
-            text = f"✅ {course['name'].title()}"
+            text = f"{course['name'].title()}"
             
         buttons.append(InlineKeyboardButton(text=text, callback_data=callback_data))
 

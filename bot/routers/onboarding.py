@@ -39,8 +39,8 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     if department_id:
         # Already has department, skip straight to menu
         await message.answer(
-            f"Welcome back, {message.from_user.first_name}! 👋\n\n"
-            "Ready to study today?",
+            f"Welcome back, {message.from_user.first_name}.\n\n"
+            "Ready to continue studying?",
             reply_markup=main_menu_keyboard(),
         )
         return
@@ -53,16 +53,16 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
 
     if not departments:
         await message.answer(
-            "Welcome to TeleExam AI Bot! 👋\n\n"
+            "Welcome to TeleExam AI.\n\n"
             "Currently, there are no departments available. Please try again later.",
             reply_markup=main_menu_keyboard(),
         )
         return
 
     welcome_text = (
-        f"Hello, {message.from_user.first_name}! 👋\n\n"
-        "Welcome to TeleExam AI Bot! To provide you with the best study experience, "
-        "please select your department from the list below:"
+        f"Hello, {message.from_user.first_name}.\n\n"
+        "Welcome to TeleExam AI. To customize your study experience, "
+        "please select your department below:"
     )
     
     await state.set_state(Onboarding.selecting_department)
@@ -109,9 +109,9 @@ async def process_department_selection(callback: CallbackQuery, state: FSMContex
     await state.set_state(None)  # Clear onboarding state
 
     # Update message and show main menu
-    await callback.message.edit_text("Department selected successfully! ✅")
+    await callback.message.edit_text("Department successfully set.")
     await callback.message.answer(
-        "Welcome to TeleExam AI! You can now start practicing or take mock exams. "
-        "Use the menu below to navigate.",
+        "Welcome to TeleExam AI. You can now access Practice Mode and Exam Mode.\n\n"
+        "Please use the menu below to navigate.",
         reply_markup=main_menu_keyboard(),
     )

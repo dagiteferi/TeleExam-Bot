@@ -61,29 +61,29 @@ def _format_study_plan(plan: StudyPlanDetails) -> str:
 
     # Header
     lines = [
-        f"📚 <b>Your Personalized Study Plan</b>",
+        f"<b>Your Personalized Study Plan</b>",
         divider,
-        f"📊 <b>Performance Summary</b>",
+        f"<b>Performance Summary</b>",
         f"{plan.summary}",
-        f"\n🏆 Exams completed: <b>{plan.total_exams_done}</b>",
-        f"📈 Average score: <b>{plan.overall_score_percent:.1f}%</b>",
+        f"\nExams completed: <b>{plan.total_exams_done}</b>",
+        f"Average score: <b>{plan.overall_score_percent:.1f}%</b>",
         "",
         divider,
-        "⚠️ <b>Your Weak Topics</b>",
+        "<b>Focus Areas</b>",
     ]
 
     # Weak topics
     for wt in plan.weak_topics:
-        icon = "🔴" if wt.focus == "High Priority" else "🟡" if wt.focus == "Medium" else "🟢"
-        lines.append(f"{icon}  <b>{wt.topic}</b>  —  {wt.errors} errors  ({wt.focus})")
+        priority_label = f"({wt.focus} Priority)"
+        lines.append(f"• <b>{wt.topic}</b> — {wt.errors} errors {priority_label}")
 
-    lines += ["", divider, "📅 <b>7-Day Study Plan</b>"]
+    lines += ["", divider, "<b>7-Day Study Plan</b>"]
 
     # Daily plan
     for d in plan.daily_plan:
-        lines.append(f"<b>Day {d.day}:</b>  {d.topic}  →  {d.action}")
+        lines.append(f"<b>Day {d.day}:</b> {d.topic} → {d.action}")
 
-    lines += ["", divider, "<i>💡 Stick to this plan daily for best results!</i>"]
+    lines += ["", divider, "<i>Adhere to this plan daily for optimal results.</i>"]
     return "\n".join(lines)
 
 
@@ -115,7 +115,7 @@ async def handle_ai_explanation(message: Message, state: FSMContext, qtoken: str
         return
 
     # Show a "thinking" message first for UX
-    thinking_msg = await message.answer("🧠 <i>AI Tutor is thinking...</i>", parse_mode="HTML")
+    thinking_msg = await message.answer("<i>AI Tutor is analyzing...</i>", parse_mode="HTML")
 
     explanation_data = await api_client.post(
         path="/api/ai/explain",
@@ -143,16 +143,16 @@ async def handle_ai_explanation(message: Message, state: FSMContext, qtoken: str
 
     divider = "━" * 30
     explanation_msg = (
-        f"🧠 <b>AI Explanation</b>\n"
+        f"<b>AI Explanation</b>\n"
         f"{divider}\n\n"
         f"{explanation_data.explanation}"
     )
     if explanation_data.weak_topic_suggestion:
-        explanation_msg += f"\n\n{divider}\n💡 <i>{explanation_data.weak_topic_suggestion}</i>"
+        explanation_msg += f"\n\n{divider}\n<i>Note: {explanation_data.weak_topic_suggestion}</i>"
 
     # Keyboard for follow-up
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Ask Follow-up", callback_data="ai_followup")]
+        [InlineKeyboardButton(text="Ask Follow-up", callback_data="ai_followup")]
     ])
 
     await message.answer(
@@ -174,9 +174,9 @@ async def ai_followup_callback(callback: CallbackQuery, state: FSMContext) -> No
     
     await state.set_state(AIInteraction.chatting)
     await callback.message.answer(
-        "💬 <b>Follow-up Mode</b>\n"
-        "Ask me for any clarification about this question. I'm listening!\n\n"
-        "<i>To continue with your questions, use the button below or type /end_chat.</i>",
+        "<b>Follow-up Mode</b>\n"
+        "Ask me for any clarification about this question.\n\n"
+        "<i>To exit, use the button below or type /end_chat.</i>",
         parse_mode="HTML",
         reply_markup=chat_menu_keyboard()
     )
@@ -214,16 +214,15 @@ async def ai_tutor_start_handler(message: Message, state: FSMContext) -> None:
         pass
 
     await message.answer(
-        "👋 <b>Hello! I'm your AI Tutor.</b>\n\n"
-        "Ask me <b>any question</b> about your studies and I'll help you understand it.\n\n"
-        "<i>Use the menu to finish our conversation.</i>",
+        "<b>AI Tutor Interface</b>\n\n"
+        "Ask me any question about your studies and I will provide an explanation.\n\n"
+        "<i>Use the menu to end our conversation.</i>",
         parse_mode="HTML",
         reply_markup=chat_menu_keyboard()
     )
 
 
-@router.message(AIInteraction.chatting, F.text == "/end_chat")
-@router.message(AIInteraction.chatting, F.text == "🔚 End Chat")
+@router.message(AIInteraction.chatting, F.text == "End Chat")
 async def ai_tutor_end_handler(message: Message, state: FSMContext) -> None:
     """Ends the AI Tutor chat session."""
     if not message.from_user:
@@ -247,7 +246,7 @@ async def ai_tutor_end_handler(message: Message, state: FSMContext) -> None:
     else:
         await state.set_state(None)
         await message.answer(
-            "✅ AI Tutor chat ended.\n\nGood luck with your studies! 🎓",
+            "AI Tutor session ended. Continuing your studies.",
             reply_markup=main_menu_keyboard(),
         )
 
@@ -262,7 +261,7 @@ async def ai_tutor_chat_handler(message: Message, state: FSMContext) -> None:
     user_data = await state.get_data()
     question_id = user_data.get("question_id", "00000000-0000-0000-0000-000000000000")
 
-    thinking_msg = await message.answer("🧠 <i>Thinking...</i>", parse_mode="HTML")
+    thinking_msg = await message.answer("<i>Analyzing...</i>", parse_mode="HTML")
 
     ai_response = await api_client.post(
         path="/api/ai/chat",
@@ -288,9 +287,9 @@ async def ai_tutor_chat_handler(message: Message, state: FSMContext) -> None:
 
     divider = "━" * 20
     await message.answer(
-        f"🤖 {ai_response.ai_response}\n\n"
+        f"{ai_response.ai_response}\n\n"
         f"{divider}\n"
-        f"<i>Tap 🔚 End Chat or type /end_chat to finish</i>",
+        f"<i>Tap End Chat or type /end_chat to exit</i>",
         parse_mode="HTML",
         protect_content=True,
     )
@@ -298,7 +297,7 @@ async def ai_tutor_chat_handler(message: Message, state: FSMContext) -> None:
 
 # ─── Study Plan ──────────────────────────────────────────────────────────────
 
-@router.message(F.text == "📊 My Study Plan")
+@router.message(F.text == "📅 Study Plan")
 async def my_study_plan_handler(message: Message, state: FSMContext) -> None:
     """Handles study plan generation."""
     if not message.from_user:
@@ -314,7 +313,7 @@ async def my_study_plan_handler(message: Message, state: FSMContext) -> None:
         return
 
     thinking_msg = await message.answer(
-        "📊 <i>Analyzing your exam history and generating a personalized study plan...</i>",
+        "<i>Analyzing exam history and generating personalized study plan...</i>",
         parse_mode="HTML",
     )
 

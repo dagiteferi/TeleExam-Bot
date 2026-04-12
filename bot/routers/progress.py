@@ -53,11 +53,11 @@ def _trend_arrow(scores: list[float]) -> str:
         return ""
     diff = scores[-1] - scores[-2]
     if diff > 3:
-        return "📈 Improving"
+        return "(Improving)"
     elif diff < -3:
-        return "📉 Declining"
+        return "(Declining)"
     else:
-        return "➡️ Steady"
+        return "(Steady)"
 
 
 def _format_progress(data: ProgressResponse) -> str:
@@ -65,52 +65,51 @@ def _format_progress(data: ProgressResponse) -> str:
 
     # Overall header
     lines = [
-        "📈  <b>Your Progress Dashboard</b>",
+        "<b>Your Progress Dashboard</b>",
         divider,
         "",
-        "🗂  <b>Overall Stats</b>",
-        f"📝  Exams taken:        <b>{data.total_exams_taken}</b>",
-        f"🏋️  Practice sessions:  <b>{data.total_practice_sessions}</b>",
-        f"❓  Questions answered: <b>{data.total_questions_answered}</b>",
-        f"✅  Correct:            <b>{data.total_correct}</b>",
-        f"❌  Wrong:              <b>{data.total_wrong}</b>",
+        "<b>Overall Statistics</b>",
+        f"Exams taken:        <b>{data.total_exams_taken}</b>",
+        f"Practice sessions:  <b>{data.total_practice_sessions}</b>",
+        f"Questions answered: <b>{data.total_questions_answered}</b>",
+        f"Correct answers:    <b>{data.total_correct}</b>",
+        f"Incorrect answers:  <b>{data.total_wrong}</b>",
         "",
-        f"🎯  <b>Overall Accuracy</b>",
+        f"<b>Overall Accuracy</b>",
         f"    {_accuracy_bar(data.overall_accuracy_percent)}",
     ]
 
     # Score trend
     if data.recent_exam_scores:
         trend = _trend_arrow(data.recent_exam_scores)
-        recent_str = "  →  ".join(f"{s:.0f}%" for s in data.recent_exam_scores)
+        recent_str = " → ".join(f"{s:.0f}%" for s in data.recent_exam_scores)
         lines += [
             "",
             divider,
-            "📊  <b>Recent Exam Scores</b>  " + (f"({trend})" if trend else ""),
+            f"<b>Recent Exam Scores</b> {trend}",
             f"    {recent_str}",
         ]
 
     # Per-course breakdown
     if data.course_breakdown:
-        lines += ["", divider, "📚  <b>Per-Course Accuracy</b>"]
+        lines += ["", divider, "<b>Per-Course Accuracy</b>"]
         for c in data.course_breakdown:
-            icon = "🟢" if c.accuracy_percent >= 70 else "🟡" if c.accuracy_percent >= 50 else "🔴"
-            lines.append(f"{icon}  <b>{c.course_name}</b>")
+            lines.append(f"• <b>{c.course_name}</b>")
             lines.append(f"    {_accuracy_bar(c.accuracy_percent, 8)}  ({c.correct}/{c.total_answered} correct)")
 
     # Weak topics
     if data.weak_topics:
-        lines += ["", divider, "⚠️  <b>Topics Needing Attention</b>"]
+        lines += ["", divider, "⚠️ <b>Topics Requiring Attention</b>"]
         for t in data.weak_topics:
-            lines.append(f"🔴  {t.topic_name}  —  <b>{t.error_count}</b> mistakes")
+            lines.append(f"• {t.topic_name} — <b>{t.error_count}</b> mistakes")
 
-    lines += ["", divider, "<i>💡 Keep practicing to improve your scores!</i>"]
+    lines += ["", divider, "<i>Consistent practice leads to consistent improvement.</i>"]
     return "\n".join(lines)
 
 
 # ─── Handler ─────────────────────────────────────────────────────────────────
 
-@router.message(F.text == "📈 My Progress")
+@router.message(F.text == "📊 My Progress")
 async def my_progress_handler(message: Message, state: FSMContext) -> None:
     """
     Displays the user's private progress dashboard.
@@ -144,8 +143,8 @@ async def my_progress_handler(message: Message, state: FSMContext) -> None:
 
     if progress_data.total_questions_answered == 0:
         await message.answer(
-            "📭  <b>No activity yet!</b>\n\n"
-            "Start practicing or take an exam to see your progress here.",
+            "<b>No activity recorded yet.</b>\n\n"
+            "Complete a session in Practice Mode or Exam Mode to view your statistics here.",
             parse_mode="HTML",
             reply_markup=main_menu_keyboard(),
         )
