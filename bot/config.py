@@ -23,7 +23,11 @@ class Settings(BaseSettings):
     )
     HOST: str = Field("0.0.0.0", description="Host address for the aiohttp server")
     PORT: int = Field(8080, description="Port for the aiohttp server")
-    REDIS_URL: str = Field(..., description="Redis URL for FSM storage. Must be provided in .env or environment.")
+    
+    ENVIRONMENT: str = Field("development", description="Environment mode: 'development' or 'production'")
+    REDIS_URL: Optional[str] = Field(None, description="Prod Redis URL for FSM storage.")
+    DEV_REDIS_URL: str = Field("redis://localhost:6379/1", description="Dev Redis URL for FSM storage fallback.")
+
 
     model_config = SettingsConfigDict(
         env_file=".env",

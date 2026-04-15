@@ -2,37 +2,34 @@ from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
-    """
-    Generates the main menu ReplyKeyboardMarkup for persistent navigation.
-    """
-    keyboard = ReplyKeyboardMarkup(
+    return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="📚 Take Exam"),
-                KeyboardButton(text="📝 Practice Questions"),
+                KeyboardButton(text="📝 Exam Mode"),
+                KeyboardButton(text="🎯 Practice Mode"),
             ],
             [
                 KeyboardButton(text="🧠 AI Tutor"),
-                KeyboardButton(text="📊 My Study Plan"),
+                KeyboardButton(text="📅 Study Plan"),
             ],
             [
-                KeyboardButton(text="📈 My Progress"),
-                KeyboardButton(text="🔗 Refer & Earn"),
+                KeyboardButton(text="📊 My Progress"),
+                KeyboardButton(text="🤝 Invite Friends"),
             ],
+            [
+                KeyboardButton(text="📁 Saved Questions"),
+            ]
         ],
         resize_keyboard=True,
         is_persistent=True,
         one_time_keyboard=False,
+        input_field_placeholder="Choose an option from the menu...",
     )
-    return keyboard
 
 
 def chat_menu_keyboard() -> ReplyKeyboardMarkup:
-    """
-    Generates a simple reply keyboard to end the AI chat session.
-    """
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="🔚 End Chat")]],
+        keyboard=[[KeyboardButton(text="End Chat")]],
         resize_keyboard=True,
-        input_field_placeholder="Ask your follow-up questions here..."
+        input_field_placeholder="Type your question here...",
     )

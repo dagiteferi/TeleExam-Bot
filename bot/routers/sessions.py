@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from pydantic import BaseModel
 
 from bot.keyboards.inline import (
@@ -60,7 +60,7 @@ def _format_question_message(question: QuestionPayload, mode: str) -> str:
     """Formats question text with number, choices, and mode badge."""
     q_num = question.index + 1
     q_total = question.total
-    mode_icon = "📚" if mode == "exam" else "📝"
+    mode_icon = "📋" if mode == "exam" else "✏️"
 
     # Header line: progress and mode
     header = f"{mode_icon}  <b>Question {q_num} of {q_total}</b>"
@@ -80,12 +80,11 @@ def _format_question_message(question: QuestionPayload, mode: str) -> str:
     # Historical Context (if available)
     context_footer = ""
     if question.year and question.semester:
-        context_footer = f"📅 <i>Source: {question.year} - {question.semester.title()}</i>\n"
+        context_footer = f"<i>Source: {question.year} - {question.semester.title()}</i>\n"
 
     clarity_link = ""
     if mode == "practice":
-
-        clarity_link = f" or 🧠 <a href='https://t.me/TeleExamAI_bot?start=expai_{question.qtoken}'>Ask AI Clarity</a>"
+        clarity_link = f" or <a href='https://t.me/TeleExamAI_bot?start=expai_{question.qtoken}'>Ask AI Tutor</a>"
 
     return (
         f"{header}\n"
@@ -161,8 +160,8 @@ async def send_question(
     )
 
 
-@router.message(F.text == "📚 Take Exam")
-@router.message(F.text == "📝 Practice Questions")
+@router.message(F.text == "📝 Exam Mode")
+@router.message(F.text == "🎯 Practice Mode")
 async def start_session_handler(message: Message, state: FSMContext) -> None:
     """
     Handles starting a new exam or practice session based on user's menu choice.
@@ -171,9 +170,9 @@ async def start_session_handler(message: Message, state: FSMContext) -> None:
         return
 
     mode: Literal["exam", "practice"]
-    if message.text == "📚 Take Exam":
+    if message.text == "📝 Exam Mode":
         mode = "exam"
-    elif message.text == "📝 Practice Questions":
+    elif message.text == "🎯 Practice Mode":
         mode = "practice"
     else:
         await message.answer("Invalid session type. Please choose from the menu.")
@@ -200,10 +199,13 @@ async def start_session_handler(message: Message, state: FSMContext) -> None:
 
         if not exams:
             await message.answer(
-                "Currently, there are no mock exams available for your department.",
+                "Currently, there are no exams available for your department.",
                 reply_markup=main_menu_keyboard(),
             )
             return
+
+        import logging
+        logging.getLogger(__name__).info(f"============ BOT RECEIVED EXAMS: {exams} ============")
 
         await state.set_state(ExamSession.selecting_exam)
         await message.answer(
@@ -229,6 +231,51 @@ async def start_session_handler(message: Message, state: FSMContext) -> None:
             "Select a course to practice:",
             reply_markup=course_selection_keyboard(courses),
         )
+
+
+@router.callback_query(F.data.startswith("locked_course_"))
+async def process_locked_course_selection(callback: CallbackQuery) -> None:
+    """
+    Handles selection of a locked course — shows a persistent message with invite link.
+    """
+    if not callback.from_user or not callback.message:
+        await callback.answer()
+        return
+
+    await callback.answer()  # Dismiss the loading spinner immediately
+
+    parts = callback.data.split("_")
+    req_invites = parts[2] if len(parts) >= 3 else "a few"
+
+    # Fetch user's referral info to get their personal invite link
+    user_data = await api_client.post(
+        path="/api/users/upsert",
+        telegram_id=callback.from_user.id,
+        payload={"telegram_id": callback.from_user.id},
+    )
+
+    invite_code = user_data.get("invite_code") if user_data else None
+    invite_count = user_data.get("invite_count", 0) if user_data else 0
+    bot_link = f"https://t.me/TeleExamAI_bot?start=ref_{invite_code}" if invite_code else "https://t.me/TeleExamAI_bot"
+    share_url = f"https://t.me/share/url?url={bot_link}&text=Study%20better%20with%20TeleExam%20AI!%20Access%20past%20exams%20now."
+
+    text = (
+        "🔒  <b>This Course is Locked</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"You need <b>{req_invites} total invite(s)</b> to unlock all practice courses.\n"
+        f"📊  Your current invites: <b>{invite_count}</b>\n\n"
+        "👇  <b>Share your invite link with friends to unlock this content:</b>\n"
+        f"<code>{bot_link}</code>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>Every friend who joins via your link counts as one invite!</i>"
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Share Invite Link", url=share_url)],
+        [InlineKeyboardButton(text="⬅️ Back to Courses", callback_data="back_to_courses")],
+    ])
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 
 @router.callback_query(F.data.startswith("select_course_"), ExamSession.selecting_course)
@@ -280,6 +327,127 @@ async def process_course_selection(callback: CallbackQuery, state: FSMContext) -
     await state.update_data(session_id=session_id, mode="practice")
     await state.set_state(ExamSession.active)
     await send_question(callback.message, state, session_id, callback.from_user.id)
+
+
+@router.callback_query(F.data.startswith("locked_ex_"))
+async def process_locked_exam_selection(callback: CallbackQuery) -> None:
+    """
+    Handles selection of a locked exam — shows a persistent message with invite link.
+    """
+    if not callback.from_user or not callback.message:
+        await callback.answer()
+        return
+
+    await callback.answer()  # Dismiss the loading spinner immediately
+
+    parts = callback.data.split("_")
+    req_invites = parts[2] if len(parts) >= 3 else "a few"
+
+    # Fetch user's referral info to get their personal invite link
+    user_data = await api_client.post(
+        path="/api/users/upsert",
+        telegram_id=callback.from_user.id,
+        payload={"telegram_id": callback.from_user.id},
+    )
+
+    invite_code = user_data.get("invite_code") if user_data else None
+    invite_count = user_data.get("invite_count", 0) if user_data else 0
+    bot_link = f"https://t.me/TeleExamAI_bot?start=ref_{invite_code}" if invite_code else "https://t.me/TeleExamAI_bot"
+    share_url = f"https://t.me/share/url?url={bot_link}&text=Study%20better%20with%20TeleExam%20AI!%20Access%20past%20exams%20now."
+
+    text = (
+        "🔒  <b>This Exam Year is Locked</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"You need <b>{req_invites} invite(s)</b> to unlock this exam year.\n"
+        f"📊  Your current invites: <b>{invite_count}</b>\n\n"
+        "👇  <b>Share your invite link with friends to unlock this content:</b>\n"
+        f"<code>{bot_link}</code>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>Every friend who joins via your link counts as one invite!</i>"
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Share Invite Link", url=share_url)],
+        [InlineKeyboardButton(text="⬅️ Back to Exams", callback_data="back_to_exams")],
+    ])
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "back_to_courses")
+async def back_to_courses_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    """
+    Returns the user to the course selection list after dismissing the locked screen.
+    """
+    if not callback.from_user or not callback.message:
+        await callback.answer()
+        return
+
+    await callback.answer()
+
+    user_data = await state.get_data()
+    department_id = user_data.get("department_id")
+
+    if not department_id:
+        await callback.message.edit_text(
+            "⚠️ Could not find your department. Please use /start to set it up again."
+        )
+        return
+
+    courses = await api_client.get(
+        path=f"/api/questions/discovery/courses?department_id={department_id}",
+        telegram_id=callback.from_user.id,
+    )
+
+    if not courses:
+        await callback.message.edit_text(
+            "No courses found for your department. Please try again later."
+        )
+        return
+
+    await state.set_state(ExamSession.selecting_course)
+    await callback.message.edit_text(
+        "Select a course to practice:",
+        reply_markup=course_selection_keyboard(courses),
+    )
+
+
+@router.callback_query(F.data == "back_to_exams")
+async def back_to_exams_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    """
+    Returns the user to the exam selection list after dismissing the locked screen.
+    """
+    if not callback.from_user or not callback.message:
+        await callback.answer()
+        return
+
+    await callback.answer()
+
+    user_data = await state.get_data()
+    department_id = user_data.get("department_id")
+
+    if not department_id:
+        await callback.message.edit_text(
+            "⚠️ Could not find your department. Please use /start to set it up again."
+        )
+        return
+
+    exams = await api_client.get(
+        path=f"/api/questions/discovery/department/{department_id}/exams",
+        telegram_id=callback.from_user.id,
+    )
+
+    if not exams:
+        await callback.message.edit_text(
+            "No exams found for your department. Please try again later."
+        )
+        return
+
+    await state.set_state(ExamSession.selecting_exam)
+    await callback.message.edit_text(
+        "Select an exam to start:",
+        reply_markup=exam_selection_keyboard(exams),
+    )
 
 
 @router.callback_query(F.data.startswith("ex_"), ExamSession.selecting_exam)
@@ -394,25 +562,23 @@ async def process_answer_callback(callback: CallbackQuery, state: FSMContext) ->
 
     if is_practice:
         if answer_data.is_correct:
-            result_line = f"✅  <b>Correct!</b>"
-            selected_line = f"You chose <b>{choice})</b>  {selected_text}"
-            result_block = f"{result_line}\n{selected_line}"
+            result_block = f"✅ <b>Correct!</b>\nYou chose <b>{choice})</b> {selected_text}"
         else:
             correct_letter = answer_data.correct_choice or "?"
-            # Find correct option text
             correct_index = ord(correct_letter) - 65 if len(correct_letter) == 1 else -1
             correct_text = question_options[correct_index] if 0 <= correct_index < len(question_options) else correct_letter
-            result_line = f"❌  <b>Incorrect</b>"
-            selected_line = f"You chose <b>{choice})</b>  <s>{selected_text}</s>"
-            correct_line = f"Correct answer: <b>{correct_letter})</b>  {correct_text}"
-            result_block = f"{result_line}\n{selected_line}\n{correct_line}"
+            result_block = (
+                f"❌ <b>Incorrect</b>\n"
+                f"You chose <b>{choice})</b> <s>{selected_text}</s>\n"
+                f"Correct answer: <b>{correct_letter})</b> {correct_text}"
+            )
 
         if answer_data.explanation:
-            explanation_block = f"\n{divider}\n💡  <b>Explanation</b>\n{answer_data.explanation}"
+            explanation_block = f"\n{divider}\n<b>Explanation</b>\n{answer_data.explanation}"
         else:
             explanation_block = ""
     else:
-        result_block = f"📌  Answer <b>{choice}</b> submitted."
+        result_block = f"Answer <b>{choice}</b> submitted."
         explanation_block = ""
 
     # Reconstruct the full message to keep question context visible
@@ -430,6 +596,7 @@ async def process_answer_callback(callback: CallbackQuery, state: FSMContext) ->
             session_id=session_id,
             has_next_question=user_data.get("has_next", False),
             is_practice_mode=is_practice,
+            question_id=question_id,
             qtoken=qtoken if is_practice else None,
         ),
         parse_mode="HTML",
@@ -551,25 +718,21 @@ async def end_session_callback(callback: CallbackQuery, state: FSMContext) -> No
         msg_text = submit_data.message
 
     if pct >= 80:
-        grade_emoji = "🏆"
-        grade_label = "Excellent!"
+        grade_label = "Excellent Performance"
     elif pct >= 60:
-        grade_emoji = "👍"
-        grade_label = "Good job!"
+        grade_label = "Good Effort"
     elif pct >= 40:
-        grade_emoji = "📖"
-        grade_label = "Keep studying!"
+        grade_label = "Needs Improvement"
     else:
-        grade_emoji = "💪"
-        grade_label = "Don't give up!"
+        grade_label = "Review Recommended"
 
     divider = "━" * 30
     result_message = (
-        f"🎓  <b>Session Complete!</b>\n"
+        f"<b>Session Summary</b>\n"
         f"{divider}\n\n"
-        f"{grade_emoji}  <b>{grade_label}</b>\n\n"
-        f"📊  Score:  <b>{score} / {total}</b>\n"
-        f"📈  Percentage:  <b>{pct:.1f}%</b>\n\n"
+        f"<b>{grade_label}</b>\n\n"
+        f"Score: <b>{score} / {total}</b>\n"
+        f"Accuracy: <b>{pct:.1f}%</b>\n\n"
         f"{divider}\n"
         f"<i>{submit_data.message}</i>"
     )
@@ -584,3 +747,86 @@ async def end_session_callback(callback: CallbackQuery, state: FSMContext) -> No
         reply_markup=main_menu_keyboard(),
     )
     await state.clear()
+
+
+@router.callback_query(F.data.startswith("bmk_"))
+async def toggle_bookmark_callback(callback: CallbackQuery) -> None:
+    """Handles the 'Save Question' button."""
+    if not callback.from_user or not callback.message:
+        return
+        
+    question_id = callback.data.split("_")[1]
+    
+    # Show loading
+    await callback.answer("Saving question...", show_alert=False)
+    
+    response_data = await api_client.post(
+        path=f"/api/bookmarks/{question_id}",
+        telegram_id=callback.from_user.id,
+        payload={}
+    )
+    
+    if response_data and response_data.get("success"):
+        await callback.answer(response_data.get("message", "🔖 Question Saved!"), show_alert=True)
+    else:
+        await callback.answer("Failed to save question. Try again.", show_alert=True)
+
+
+@router.message(F.text == "📁 Saved Questions")
+async def view_bookmarks_handler(message: Message, state: FSMContext) -> None:
+    """Displays user's saved questions."""
+    if not message.from_user:
+        return
+        
+    thinking = await message.answer("<i>Loading your saved questions...</i>", parse_mode="HTML")
+    
+    # Get bookmarks from backend
+    data = await api_client.get(
+        path="/api/bookmarks",
+        telegram_id=message.from_user.id
+    )
+    
+    try:
+        await thinking.delete()
+    except:
+        pass
+        
+    if not data or not data.get("items"):
+        await message.answer(
+            "You don't have any saved questions yet.\n\n"
+            "While in <b>Practice Mode</b>, tap <b>🔖 Save Question</b> to bookmark difficult questions here for later review!",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard()
+        )
+        return
+        
+    items = data.get("items", [])
+    
+    # Format bookmarks nicely (send a few as rich text, limit to 5 per message to avoid floods)
+    await message.answer(f"📚 <b>Your Saved Questions</b> ({len(items)} total)\n\n<i>Here are your most recently saved questions. Review them carefully!</i>", parse_mode="HTML")
+    
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    
+    for i, item in enumerate(items[:5]): # Show up to 5 latest
+        prompt = item.get("prompt", "Question text unavailable")
+        correct = item.get("correct_choice")
+        
+        # Build block
+        block = f"<b>Q:</b> {prompt}\n\n"
+        if item.get("choice_a"): block += f"A) {item['choice_a']}\n"
+        if item.get("choice_b"): block += f"B) {item['choice_b']}\n"
+        if item.get("choice_c"): block += f"C) {item['choice_c']}\n"
+        if item.get("choice_d"): block += f"D) {item['choice_d']}\n"
+        
+        block += f"\n🏆 <b>Correct Answer:</b> {correct}"
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text="❌ Remove Bookmark", callback_data=f"bmk_{item['question_id']}")
+        
+        await message.answer(block, parse_mode="HTML", reply_markup=builder.as_markup())
+        
+    if len(items) > 5:
+        await message.answer(f"<i>...and {len(items)-5} more. Unsave older ones to see them here!</i>", parse_mode="HTML")
+
+
+

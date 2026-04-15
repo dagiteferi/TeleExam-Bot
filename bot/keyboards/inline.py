@@ -27,6 +27,7 @@ def session_action_keyboard(
     session_id: str,
     has_next_question: bool,
     is_practice_mode: bool,
+    question_id: Optional[str] = None,
     qtoken: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     """
@@ -39,9 +40,15 @@ def session_action_keyboard(
         # Callback data format: "expai_{qtoken}"
         buttons.append(
             InlineKeyboardButton(
-                text="🧠 Explain with AI", callback_data=f"expai_{qtoken}"
+                text="🤖 Ask AI Tutor", callback_data=f"expai_{qtoken}"
             )
         )
+        if question_id:
+            buttons.append(
+                InlineKeyboardButton(
+                    text="🔖 Save Question", callback_data=f"bmk_{question_id}"
+                )
+            )
 
     if has_next_question:
         # Callback data format: "next_{session_id}"
@@ -54,7 +61,7 @@ def session_action_keyboard(
         # Callback data format: "end_{session_id}"
         buttons.append(
             InlineKeyboardButton(
-                text="✅ End Session", callback_data=f"end_{session_id}"
+                text="End Session", callback_data=f"end_{session_id}"
             )
         )
 
@@ -89,18 +96,25 @@ def exam_selection_keyboard(exams: List[dict]) -> InlineKeyboardMarkup:
     Each button's callback data will include the exam year and semester.
     Sorted by year in increasing order.
     """
-    # Sort exams by year (ascending)
+    # Sort exams by year (ascending so oldest is at the top, newest at the bottom)
     # If years are equal, sort by semester (ascending)
-    exams_sorted = sorted(exams, key=lambda x: (x["year"], x["semester"]))
+    exams_sorted = sorted(exams, key=lambda x: (x["year"], x["semester"]), reverse=False)
 
     buttons = []
     for exam in exams_sorted:
         exam_id = exam["id"]
         year = exam["year"]
         semester = exam["semester"]
-        # Callback data format: "ex_{id}_{year}_{semester}" (Max 64 chars)
-        callback_data = f"ex_{exam_id}_{year}_{semester}"
-        text = f"{year} - {semester.title()}"
+        is_locked = exam.get("is_locked", False)
+        req_invites = exam.get("required_invites", 1)
+        
+        if is_locked:
+            callback_data = f"locked_ex_{req_invites}"
+            text = f"🔒 {year} - {semester.title()}"
+        else:
+            callback_data = f"ex_{exam_id}_{year}_{semester}"
+            text = f"{year} - {semester.title()}"
+            
         buttons.append(
             InlineKeyboardButton(text=text, callback_data=callback_data)
         )
@@ -113,22 +127,34 @@ def exam_selection_keyboard(exams: List[dict]) -> InlineKeyboardMarkup:
 
 def course_selection_keyboard(courses: List[dict]) -> InlineKeyboardMarkup:
     """
-    Generates an inline keyboard for selecting a course for practice mode.
-    Each button's callback data will include the course ID.
-    Sorted alphabetically by name.
+    Generates an inline keyboard for selecting a specific course.
     """
-    # Sort courses by name (ascending)
-    courses_sorted = sorted(courses, key=lambda x: x["name"])
-
     buttons = []
-    for course in courses_sorted:
-        # Callback data format: "select_course_{course_id}"
-        callback_data = f"select_course_{course['id']}"
-        buttons.append(
-            InlineKeyboardButton(text=course["name"].title(), callback_data=callback_data)
-        )
+    for course in courses:
+        course_id = course["id"]
+        is_locked = course.get("is_locked", False)
+        req_invites = course.get("required_invites", 4)
+        
+        if is_locked:
+            callback_data = f"locked_course_{req_invites}"
+            text = f"🔒 {course['name'].title()}"
+        else:
+            callback_data = f"select_course_{course_id}"
+            text = f"{course['name'].title()}"
+            
+        buttons.append(InlineKeyboardButton(text=text, callback_data=callback_data))
 
     # Arrange buttons in a single column
     keyboard_rows = [[button] for button in buttons]
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+
+def pro_plan_keyboard() -> InlineKeyboardMarkup:
+    """
+    Generates an inline keyboard to promote the PRO plan.
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💎 Upgrade to PRO", callback_data="buy_pro")],
+        [InlineKeyboardButton(text="📞 Contact Support", url="https://t.me/your_support_handle")]
+    ])
+

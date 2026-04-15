@@ -12,7 +12,9 @@ from bot.routers.ai_tutor import router as ai_tutor_router
 from bot.routers.onboarding import router as onboarding_router
 from bot.routers.progress import router as progress_router
 from bot.routers.sessions import router as sessions_router
+from bot.routers.referral import router as referral_router
 from bot.services.api_client import api_client
+
 
 
 import platform
@@ -32,13 +34,22 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 
    
-    # Clean the URL and ensure it has a scheme
-    redis_url = settings.REDIS_URL.strip()
-    if not redis_url.startswith(("redis://", "rediss://", "unix://")):
-        redis_url = f"redis://{redis_url}"
+    # Check Environment and use appropriate REDIS URL
+    if settings.ENVIRONMENT.lower() in ("dev", "development"):
+        logging.info("Development environment detected. Overriding REDIS_URL to DEV_REDIS_URL.")
+        raw_url = settings.DEV_REDIS_URL.strip()
+    else:
+        if not settings.REDIS_URL:
+            raise ValueError("REDIS_URL must be provided in production environment.")
+        raw_url = settings.REDIS_URL.strip()
 
+    # Clean the URL and ensure it has a scheme
+    if not raw_url.startswith(("redis://", "rediss://", "unix://")):
+        raw_url = f"redis://{raw_url}"
+
+        
     storage = RedisStorage.from_url(
-        redis_url,
+        raw_url,
         key_builder=DefaultKeyBuilder(with_bot_id=True, with_destiny=True),
     )
 
@@ -54,6 +65,8 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     dp.include_router(sessions_router)
     dp.include_router(ai_tutor_router)
     dp.include_router(progress_router)
+    dp.include_router(referral_router)
+
 
     dp.shutdown.register(api_client.close_session)
 
