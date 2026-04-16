@@ -33,25 +33,24 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
 
     bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 
-   
-    # Check Environment and use appropriate REDIS URL
-    if settings.ENVIRONMENT.lower() in ("dev", "development"):
-        logging.info("Development environment detected. Overriding REDIS_URL to DEV_REDIS_URL.")
-        raw_url = settings.DEV_REDIS_URL.strip()
+    # Check Environment and select storage
+    if settings.ENVIRONMENT.lower() in ("dev", "development") and not settings.REDIS_URL:
+        from aiogram.fsm.storage.memory import MemoryStorage
+        logging.info("Development environment detected and no REDIS_URL provided. Using MemoryStorage.")
+        storage = MemoryStorage()
     else:
-        if not settings.REDIS_URL:
-            raise ValueError("REDIS_URL must be provided in production environment.")
-        raw_url = settings.REDIS_URL.strip()
-
-    # Clean the URL and ensure it has a scheme
-    if not raw_url.startswith(("redis://", "rediss://", "unix://")):
-        raw_url = f"redis://{raw_url}"
-
+        # Prioritize Prod REDIS_URL, then DEV_REDIS_URL
+        raw_url = settings.REDIS_URL.strip() if settings.REDIS_URL else settings.DEV_REDIS_URL.strip()
         
-    storage = RedisStorage.from_url(
-        raw_url,
-        key_builder=DefaultKeyBuilder(with_bot_id=True, with_destiny=True),
-    )
+        # Ensure raw_url has a scheme
+        if not raw_url.startswith(("redis://", "rediss://", "unix://")):
+            raw_url = f"redis://{raw_url}"
+
+        logging.info(f"Connecting to Redis for FSM storage...")
+        storage = RedisStorage.from_url(
+            raw_url,
+            key_builder=DefaultKeyBuilder(with_bot_id=True, with_destiny=True),
+        )
 
     dp = Dispatcher(storage=storage)
 
