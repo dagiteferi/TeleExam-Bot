@@ -847,7 +847,7 @@ async def handle_text_during_course_selection(message: Message, state: FSMContex
     
     if departments:
         await message.answer(
-            "⚠️ <b>Please use the buttons below to select a course.</b>"
+            "⚠️ <b>Please use the buttons .</b>"
             "Do not type - tap your course name from the list.",
             parse_mode="HTML"
         )
@@ -858,7 +858,7 @@ async def handle_text_during_course_selection(message: Message, state: FSMContex
         )
     else:
         await message.answer(
-            "⚠️ <b>Please use the buttons below to select a course.</b>"
+            "⚠️ <b>Please use the buttons.</b>"
             "No courses available.",
             parse_mode="HTML",
             reply_markup=main_menu_keyboard()
