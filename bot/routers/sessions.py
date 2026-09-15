@@ -833,6 +833,95 @@ async def view_bookmarks_handler(message: Message, state: FSMContext) -> None:
 
 
 
+
+
+# Text message handler during course selection
+@router.message(ExamSession.selecting_course)
+async def handle_text_during_course_selection(message: Message, state: FSMContext) -> None:
+    """Shows error when user types text instead of selecting course."""
+    if not message.from_user:
+        return
+    
+    user_data = await state.get_data()
+    departments = user_data.get("departments", [])
+    
+    if departments:
+        await message.answer(
+            "⚠️ <b>Please use the buttons below to select a course.</b>\n\n"
+            "Do not type - tap your course name from the list.",
+            parse_mode="HTML"
+        )
+        from bot.keyboards.inline import course_selection_keyboard
+        await message.answer(
+            "Select a course:",
+            reply_markup=course_selection_keyboard(departments, message.from_user.id)
+        )
+    else:
+        await message.answer(
+            "⚠️ <b>Please use the buttons below to select a course.</b>\n\n"
+            "Do not type - tap your course name from the list.\n\n"
+            "No courses available.",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard()
+        )
+
+
+# Text message handler during exam selection
+@router.message(ExamSession.selecting_exam)
+async def handle_text_during_exam_selection(message: Message, state: FSMContext) -> None:
+    """Shows error when user types text instead of selecting exam."""
+    if not message.from_user:
+        return
+    
+    user_data = await state.get_data()
+    courses = user_data.get("courses", [])
+    
+    if courses:
+        await message.answer(
+            "⚠️ <b>Please use the buttons below to select an exam.</b>\n\n"
+            "Do not type - tap your exam year/semester from the list.",
+            parse_mode="HTML"
+        )
+        from bot.keyboards.inline import exam_selection_keyboard
+        await message.answer(
+            "Select an exam:",
+            reply_markup=exam_selection_keyboard(courses, message.from_user.id)
+        )
+    else:
+        await message.answer(
+            "⚠️ <b>Please use the buttons below to select an exam.</b>\n\n"
+            "Do not type - tap your exam year/semester from the list.\n\n"
+            "No exams available.",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard()
+        )
+
+
+# Text message handler during active session
+@router.message(ExamSession.active)
+async def handle_text_during_active_session(message: Message, state: FSMContext) -> None:
+    """Shows error when user types text during active session (not answering)."""
+    if not message.from_user:
+        return
+    
+    user_data = await state.get_data()
+    if user_data.get("mode") == "exam":
+        await message.answer(
+            "⚠️ <b>Please use the buttons below to answer.</b>\n\n"
+            "Do not type - tap A, B, C, or D on the answer buttons.",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard()
+        )
+    else:
+        # For practice mode, show buttons to continue
+        await message.answer(
+            "⚠️ <b>Use the buttons below to continue.</b>\n\n"
+            "Do not type - tap buttons for actions.",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard()
+        )
+
+
 # Text message handler during exam to prevent text input
 @router.message(ExamSession.waiting_for_answer)
 async def handle_text_during_exam(message: Message, state: FSMContext) -> None:
