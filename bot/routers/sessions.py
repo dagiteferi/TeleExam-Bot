@@ -854,12 +854,21 @@ async def handle_text_during_course_selection(message: Message, state: FSMContex
         from bot.keyboards.inline import course_selection_keyboard
         await message.answer(
             "Select a course:",
-            reply_markup=course_selection_keyboard(departments, message.from_user.id)
+            reply_markup=course_selection_keyboard(departments, message.from_user.id)        return
+        
+    thinking = await message.answer("<i>Loading your saved questions...</i>", parse_mode="HTML")
+    
+    # Get bookmarks from backend
+    data = await api_client.get(
+        path="/api/bookmarks",
+        telegram_id=message.from_user.id
+    )
+    
         )
     else:
         await message.answer(
             "⚠️ <b>Please use the buttons.</b>"
-            "No courses available.",
+            "",
             parse_mode="HTML",
             reply_markup=main_menu_keyboard()
         )
@@ -877,7 +886,7 @@ async def handle_text_during_exam_selection(message: Message, state: FSMContext)
     
     if courses:
         await message.answer(
-            "⚠️ <b>Please use the buttons below to select an exam.</b>"
+            "⚠️ <b>Please use the buttons</b>"
 
 
             "Do not type - tap your exam year/semester from the list.",
@@ -890,10 +899,10 @@ async def handle_text_during_exam_selection(message: Message, state: FSMContext)
         )
     else:
         await message.answer(
-            "⚠️ <b>Please use the buttons below to select an exam.</b>"
+            "⚠️ <b>Please use the buttons</b>"
 
 
-            "No exams available.",
+            " ",
             parse_mode="HTML",
             reply_markup=main_menu_keyboard()
         )
