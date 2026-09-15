@@ -840,10 +840,32 @@ async def handle_text_during_exam(message: Message, state: FSMContext) -> None:
     if not message.from_user:
         return
     
-    await message.answer(
-        "⚠️ <b>Please use the buttons below to answer the question.</b>\n\n"
-        "Do not type your answer in the chat - tap A, B, C, or D on the answer buttons.",
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard()
-    )
-    await state.clear()
+    user_data = await state.get_data()
+    question = user_data.get("question")
+    session_id = user_data.get("session_id")
+    mode = user_data.get("mode", "exam")
+    
+    if question and session_id:
+        # Re-display the question with buttons
+        from bot.routers.sessions import _format_question_message
+        from bot.keyboards.inline import question_choices_keyboard
+        
+        formatted_question = _format_question_message(question, mode)
+        await message.answer(formatted_question, parse_mode="HTML")
+        await message.answer(
+            "⚠️ <b>Please use the buttons below to answer the question.</b>\n\n"
+            "Do not type your answer in the chat - tap A, B, C, or D on the answer buttons.",
+            parse_mode="HTML"
+        )
+        await message.answer(
+            "Answer the question:",
+            reply_markup=question_choices_keyboard(question, session_id, mode)
+        )
+    else:
+        await message.answer(
+            "⚠️ <b>Please use the buttons below to answer the question.</b>\n\n"
+            "Do not type your answer in the chat - tap A, B, C, or D on the answer buttons.",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard()
+        )
+        await state.clear()

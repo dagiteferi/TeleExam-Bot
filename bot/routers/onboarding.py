@@ -11,18 +11,38 @@ from bot.states.session_states import Onboarding
 router = Router()
 
 
-# Text message handlers to prevent text input during onboarding
+# Text message handler during onboarding - re-display buttons
 @router.message(Onboarding.selecting_department)
 async def handle_text_during_department_selection(message: Message, state: FSMContext) -> None:
-    """Shows error when user types text instead of selecting department."""
+    """Shows error when user types text instead of selecting department, re-displays buttons."""
     if not message.from_user:
         return
     
-    await message.answer(
-        "⚠️ <b>Please use the buttons below to select your department.</b>\n\n"
-        "Do not type - tap your department name from the list.",
-        parse_mode="HTML"
+    # Get departments for re-display
+    departments = await api_client.get(
+        path="/api/questions/discovery/departments",
+        telegram_id=message.from_user.id,
     )
+    
+    if departments:
+        welcome_text = (
+            f"Hello, {message.from_user.first_name}.\n\n"
+            "⚠️ <b>Please use the buttons below to select your department.</b>\n\n"
+            "Do not type - tap your department name from the list.",
+            "Please select your department below:"
+        )
+        
+        await message.answer(
+            "⚠️ <b>Please use the buttons below to select your department.</b>\n\n"
+            "Do not type - tap your department name from the list.",
+            parse_mode="HTML"
+        )
+        await message.answer(
+            f"Hello, {message.from_user.first_name}.\n\n"
+            "Welcome to TeleExam AI. To customize your study experience, "
+            "please select your department below:",
+            reply_markup=department_selection_keyboard(departments),
+        )
 
 
 @router.message(CommandStart())
