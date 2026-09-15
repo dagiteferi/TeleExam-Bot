@@ -830,48 +830,46 @@ async def view_bookmarks_handler(message: Message, state: FSMContext) -> None:
         await message.answer(f"<i>...and {len(items)-5} more. Unsave older ones to see them here!</i>", parse_mode="HTML")
 
 
-
-
-
-
-
 # Text message handler during course selection
 @router.message(ExamSession.selecting_course)
 async def handle_text_during_course_selection(message: Message, state: FSMContext) -> None:
     """Shows error when user types text instead of selecting course."""
     if not message.from_user:
         return
-    
+
     user_data = await state.get_data()
     departments = user_data.get("departments", [])
-    
+
     if departments:
         await message.answer(
-            "⚠️ <b>Please use the buttons .</b>"
+            "⚠️ <b>Please use the buttons.</b> "
             "Do not type - tap your course name from the list.",
             parse_mode="HTML"
         )
+
         from bot.keyboards.inline import course_selection_keyboard
+
         await message.answer(
             "Select a course:",
-            reply_markup=course_selection_keyboard(departments, message.from_user.id)        return
-        
-    thinking = await message.answer("<i>Loading your saved questions...</i>", parse_mode="HTML")
-    
-    # Get bookmarks from backend
+            reply_markup=course_selection_keyboard(
+                departments,
+                message.from_user.id
+            )
+        )
+        return
+
+    thinking = await message.answer(
+        "<i>Loading your saved questions...</i>",
+        parse_mode="HTML"
+    )
+
     data = await api_client.get(
         path="/api/bookmarks",
         telegram_id=message.from_user.id
     )
-    
-        )
-    else:
-        await message.answer(
-            "⚠️ <b>Please use the buttons.</b>"
-            "",
-            parse_mode="HTML",
-            reply_markup=main_menu_keyboard()
-        )
+
+    await thinking.delete()
+
 
 
 # Text message handler during exam selection
