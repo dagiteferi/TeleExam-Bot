@@ -11,6 +11,20 @@ from bot.states.session_states import Onboarding
 router = Router()
 
 
+# Text message handlers to prevent text input during onboarding
+@router.message(Onboarding.selecting_department)
+async def handle_text_during_department_selection(message: Message, state: FSMContext) -> None:
+    """Shows error when user types text instead of selecting department."""
+    if not message.from_user:
+        return
+    
+    await message.answer(
+        "⚠️ <b>Please use the buttons below to select your department.</b>\n\n"
+        "Do not type - tap your department name from the list.",
+        parse_mode="HTML"
+    )
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, command: CommandObject) -> None:
     """
@@ -30,8 +44,6 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
         elif payload.startswith("ref_"):
             ref_code = payload.split("_", 1)[1]
             await state.update_data(temp_ref_code=ref_code)
-            # We'll use this ref_code during the first upsert (department selection)
-
 
     user_data = await state.get_data()
     department_id = user_data.get("department_id")
