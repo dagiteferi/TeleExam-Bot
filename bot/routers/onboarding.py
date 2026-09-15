@@ -10,50 +10,66 @@ from bot.states.session_states import Onboarding
 
 router = Router()
 
-
-# Text message handler during onboarding - re-display buttons
+# Text message handlers to prevent text input during onboarding
 @router.message(Onboarding.selecting_department)
 async def handle_text_during_department_selection(message: Message, state: FSMContext) -> None:
-    """Shows error when user types text instead of selecting department, re-displays buttons."""
+    """Shows error when user types text instead of selecting department."""
     if not message.from_user:
         return
     
-    # Get departments for re-display
     departments = await api_client.get(
         path="/api/questions/discovery/departments",
         telegram_id=message.from_user.id,
     )
     
     if departments:
-        welcome_text = (
-            f"Hello, {message.from_user.first_name}.\n\n"
-            "⚠️ <b>Please use the buttons below to select your department.</b>\n\n"
-            "Do not type - tap your department name from the list.",
-            "Please select your department below:"
-        )
-        
         await message.answer(
             "⚠️ <b>Please use the buttons below to select your department.</b>\n\n"
             "Do not type - tap your department name from the list.",
             parse_mode="HTML"
         )
         await message.answer(
-            f"Hello, {message.from_user.first_name}.\n\n"
-            "Welcome to TeleExam AI. To customize your study experience, "
-            "please select your department below:",
+            "Select your department:",
             reply_markup=department_selection_keyboard(departments),
+        )
+    else:
+        await message.answer(
+            "⚠️ <b>Please use the buttons below to select your department.</b>\n\n"
+            "Currently no departments are available.",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(),
+        )
+
+
+# Main menu text handler - blocks non-command text
+@router.message()
+async def handle_text_in_main_menu(message: Message) -> None:
+    """Shows error when user types text that matches menu options instead of using buttons."""
+    if not message.from_user:
+        return
+    
+    # Skip if it's a command (starts with /)
+    if message.text and message.text.startswith("/"):
+        return
+    
+    # Check if text looks like a menu option
+    text_lower = message.text.lower() if message.text else ""
+    menu_keywords = ["exam", "practice", "ai", "progress", "invite", "saved", "study", "plan"]
+    
+    if any(keyword in text_lower for keyword in menu_keywords):
+        await message.answer(
+            "⚠️ <b>Please use the buttons below to select an option.</b>\n\n"
+            "Do not type - tap the button for your choice.",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard()
         )
 
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, command: CommandObject) -> None:
-    """
-    Handles the /start command, checking for deep link payloads or existing departments.
-    """
     if not message.from_user:
         return
 
-    # Check for deep link payloads (e.g., /start expai_... or /start ref_...)
     payload = command.args
     if payload:
         if payload.startswith("expai_"):
@@ -69,7 +85,6 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     department_id = user_data.get("department_id")
 
     if department_id:
-        # Already has department, skip straight to menu
         await message.answer(
             f"Welcome back, {message.from_user.first_name}.\n\n"
             "Ready to continue studying?",
@@ -77,7 +92,6 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
         )
         return
 
-    # Fetch available departments from the backend
     departments = await api_client.get(
         path="/api/questions/discovery/departments",
         telegram_id=message.from_user.id,
@@ -91,39 +105,26 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
         )
         return
 
-    welcome_text = (
-        f"Hello, {message.from_user.first_name}.\n\n"
-        "Welcome to TeleExam AI. To customize your study experience, "
-        "please select your department below:"
-    )
-    
     await state.set_state(Onboarding.selecting_department)
     await message.answer(
-        welcome_text,
+        f"Hello, {message.from_user.first_name}.\n\n"
+        "Welcome to TeleExam AI. To customize your study experience, "
+        "please select your department below:",
         reply_markup=department_selection_keyboard(departments),
     )
 
 
 @router.callback_query(F.data.startswith("select_dept_"), Onboarding.selecting_department)
 async def process_department_selection(callback: CallbackQuery, state: FSMContext) -> None:
-    """
-    Handles department selection, saves to FSM, and confirms to user.
-    """
     if not callback.from_user or not callback.message:
         return
 
-    # Always answer callback queries promptly to prevent Telegram timeout
     await callback.answer()
-
-    # Extract department ID from callback data
     dept_id = callback.data.split("_", 2)[2]
 
-    # Save selection in FSM state and persist to backend
-    # Extract temp_ref_code if it exists
     user_data = await state.get_data()
     ref_code = user_data.get("temp_ref_code")
 
-    # Explicitly update backend with the new department_id and any referral code
     await api_client.post(
         path="/api/users/upsert",
         telegram_id=callback.from_user.id,
@@ -138,9 +139,8 @@ async def process_department_selection(callback: CallbackQuery, state: FSMContex
     )
 
     await state.update_data(department_id=dept_id)
-    await state.set_state(None)  # Clear onboarding state
+    await state.set_state(None)
 
-    # Update message and show main menu
     await callback.message.edit_text("Department successfully set.")
     await callback.message.answer(
         "Welcome to TeleExam AI. You can now access Practice Mode and Exam Mode.\n\n"
