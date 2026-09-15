@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Literal, Optional
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+
 from pydantic import BaseModel
 
 from bot.keyboards.inline import (
@@ -830,3 +831,19 @@ async def view_bookmarks_handler(message: Message, state: FSMContext) -> None:
 
 
 
+
+
+# Text message handler during exam to prevent text input
+@router.message(ExamSession.waiting_for_answer)
+async def handle_text_during_exam(message: Message, state: FSMContext) -> None:
+    """Shows error when user types text instead of clicking buttons during exam."""
+    if not message.from_user:
+        return
+    
+    await message.answer(
+        "⚠️ <b>Please use the buttons below to answer the question.</b>\n\n"
+        "Do not type your answer in the chat - tap A, B, C, or D on the answer buttons.",
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard()
+    )
+    await state.clear()
