@@ -847,7 +847,9 @@ async def handle_text_during_course_selection(message: Message, state: FSMContex
     
     if departments:
         await message.answer(
-            "⚠️ <b>Please use the buttons below to select a course.</b>\n\n"
+            "⚠️ <b>Please use the buttons below to select a course.</b>
+
+"
             "Do not type - tap your course name from the list.",
             parse_mode="HTML"
         )
@@ -858,8 +860,9 @@ async def handle_text_during_course_selection(message: Message, state: FSMContex
         )
     else:
         await message.answer(
-            "⚠️ <b>Please use the buttons below to select a course.</b>\n\n"
-            "Do not type - tap your course name from the list.\n\n"
+            "⚠️ <b>Please use the buttons below to select a course.</b>
+
+"
             "No courses available.",
             parse_mode="HTML",
             reply_markup=main_menu_keyboard()
@@ -878,7 +881,9 @@ async def handle_text_during_exam_selection(message: Message, state: FSMContext)
     
     if courses:
         await message.answer(
-            "⚠️ <b>Please use the buttons below to select an exam.</b>\n\n"
+            "⚠️ <b>Please use the buttons below to select an exam.</b>
+
+"
             "Do not type - tap your exam year/semester from the list.",
             parse_mode="HTML"
         )
@@ -889,8 +894,9 @@ async def handle_text_during_exam_selection(message: Message, state: FSMContext)
         )
     else:
         await message.answer(
-            "⚠️ <b>Please use the buttons below to select an exam.</b>\n\n"
-            "Do not type - tap your exam year/semester from the list.\n\n"
+            "⚠️ <b>Please use the buttons below to select an exam.</b>
+
+"
             "No exams available.",
             parse_mode="HTML",
             reply_markup=main_menu_keyboard()
