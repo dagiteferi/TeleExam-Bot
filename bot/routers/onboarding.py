@@ -68,6 +68,21 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     user_data = await state.get_data()
     department_id = user_data.get("department_id")
 
+    # If state is missing department_id, check backend database explicitly
+    if not department_id:
+        user_profile = await api_client.get(
+            path="/api/users/me",
+            telegram_id=message.from_user.id,
+        )
+        if user_profile and user_profile.get("department_id"):
+            department_id = user_profile.get("department_id")
+            await state.update_data(
+                department_id=department_id,
+                department_name=user_profile.get("department_name"),
+                user_id=user_profile.get("user_id"),
+                is_pro=user_profile.get("is_pro", False),
+            )
+
     if department_id:
         # Already has department, skip straight to menu
         await message.answer(
@@ -104,12 +119,37 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     )
 
 
-@router.callback_query(F.data.startswith("select_dept_"), Onboarding.selecting_department)
+@router.callback_query(F.data.startswith("select_dept_"))
 async def process_department_selection(callback: CallbackQuery, state: FSMContext) -> None:
     """
     Handles department selection, saves to FSM, and confirms to user.
+    Prevents changing department if one is already set.
     """
     if not callback.from_user or not callback.message:
+        return
+
+    # Check if department is already configured for this user
+    user_data = await state.get_data()
+    existing_dept_id = user_data.get("department_id")
+
+    if not existing_dept_id:
+        user_profile = await api_client.get(
+            path="/api/users/me",
+            telegram_id=callback.from_user.id,
+        )
+        if user_profile and user_profile.get("department_id"):
+            existing_dept_id = user_profile.get("department_id")
+            await state.update_data(
+                department_id=existing_dept_id,
+                department_name=user_profile.get("department_name"),
+            )
+
+    if existing_dept_id:
+        await callback.answer(
+            "Your department is already set and cannot be changed.",
+            show_alert=True,
+        )
+        await state.set_state(None)
         return
 
     # Always answer callback queries promptly to prevent Telegram timeout
@@ -119,12 +159,10 @@ async def process_department_selection(callback: CallbackQuery, state: FSMContex
     dept_id = callback.data.split("_", 2)[2]
 
     # Save selection in FSM state and persist to backend
-    # Extract temp_ref_code if it exists
-    user_data = await state.get_data()
     ref_code = user_data.get("temp_ref_code")
 
     # Explicitly update backend with the new department_id and any referral code
-    await api_client.post(
+    upsert_res = await api_client.post(
         path="/api/users/upsert",
         telegram_id=callback.from_user.id,
         payload={
@@ -137,7 +175,16 @@ async def process_department_selection(callback: CallbackQuery, state: FSMContex
         },
     )
 
-    await state.update_data(department_id=dept_id)
+    actual_dept_id = dept_id
+    dept_name = None
+    if upsert_res and upsert_res.get("department_id"):
+        actual_dept_id = upsert_res.get("department_id")
+        dept_name = upsert_res.get("department_name")
+
+    await state.update_data(
+        department_id=actual_dept_id,
+        department_name=dept_name,
+    )
     await state.set_state(None)  # Clear onboarding state
 
     # Update message and show main menu
@@ -147,3 +194,4 @@ async def process_department_selection(callback: CallbackQuery, state: FSMContex
         "Please use the menu below to navigate.",
         reply_markup=main_menu_keyboard(),
     )
+

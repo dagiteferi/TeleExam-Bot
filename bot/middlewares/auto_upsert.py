@@ -78,11 +78,13 @@ class AutoUpsertMiddleware(BaseMiddleware):
                 await state.update_data(
                     user_id=user_response.get("user_id"),
                     department_id=user_response.get("department_id"),
+                    department_name=user_response.get("department_name"),
                     is_pro=user_response.get("is_pro", False),
                     invite_code=user_response.get("invite_code"),
                     invite_count=user_response.get("invite_count", 0),
                     _last_upsert=time.time() # Remember this call
                 )
+
         else:
             print(f"Failed to upsert user {telegram_id} to backend.")
 
