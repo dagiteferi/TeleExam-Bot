@@ -4,14 +4,16 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def question_choices_keyboard(
-    question_id: str, options: List[str], qtoken: str
+    question_id: str,
+    options: List[str],
+    qtoken: str,
+    session_id: Optional[str] = None,
+    is_practice_mode: bool = False,
 ) -> InlineKeyboardMarkup:
     """
     Generates an inline keyboard for multiple-choice question options.
-    Each option is on its own row. Buttons show only the letter label (A, B, C, D)
-    since the full text is rendered in the question message itself.
+    Each option is on its own row. Includes optional AI Tutor and End Session buttons.
     """
-    # Each answer on its own row for maximum clarity and readability
     keyboard_rows = []
     for i, _ in enumerate(options):
         choice_letter = chr(65 + i)
@@ -20,7 +22,21 @@ def question_choices_keyboard(
             InlineKeyboardButton(text=f"  {choice_letter}  ", callback_data=callback_data)
         ])
 
+    action_row = []
+    if is_practice_mode and qtoken:
+        action_row.append(
+            InlineKeyboardButton(text="🧠 Ask AI Tutor", callback_data=f"expai_{qtoken}")
+        )
+    if session_id:
+        action_row.append(
+            InlineKeyboardButton(text="⏹ End Session", callback_data=f"end_{session_id}")
+        )
+
+    if action_row:
+        keyboard_rows.append(action_row)
+
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+
 
 
 def session_action_keyboard(

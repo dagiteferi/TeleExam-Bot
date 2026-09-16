@@ -143,8 +143,13 @@ async def send_question(
     await state.set_state(ExamSession.waiting_for_answer)
     
     keyboard = question_choices_keyboard(
-        question.question_id, question.options, question.qtoken
+        question.question_id,
+        question.options,
+        question.qtoken,
+        session_id=session_id,
+        is_practice_mode=(mode == "practice"),
     )
+
     import time
     question_text = _format_question_message(question, mode)
     # Embed invisible watermark with user's telegram_id for scraper tracing
@@ -209,6 +214,7 @@ async def start_session_handler(message: Message, state: FSMContext) -> None:
         logging.getLogger(__name__).info(f"============ BOT RECEIVED EXAMS: {exams} ============")
 
         await state.set_state(ExamSession.selecting_exam)
+        await state.update_data(available_exams=exams)
         await message.answer(
             "Select an exam to start:",
             reply_markup=exam_selection_keyboard(exams),
@@ -228,10 +234,12 @@ async def start_session_handler(message: Message, state: FSMContext) -> None:
             return
 
         await state.set_state(ExamSession.selecting_course)
+        await state.update_data(available_courses=courses)
         await message.answer(
             "Select a course to practice:",
             reply_markup=course_selection_keyboard(courses),
         )
+
 
 
 @router.callback_query(F.data.startswith("locked_course_"))
@@ -833,137 +841,182 @@ async def view_bookmarks_handler(message: Message, state: FSMContext) -> None:
 # Text message handler during course selection
 @router.message(ExamSession.selecting_course)
 async def handle_text_during_course_selection(message: Message, state: FSMContext) -> None:
-    """Shows error when user types text instead of selecting course."""
+    """Shows error when user types text instead of selecting course, re-displays buttons."""
     if not message.from_user:
         return
 
     user_data = await state.get_data()
-    departments = user_data.get("departments", [])
+    courses = user_data.get("available_courses")
+    department_id = user_data.get("department_id")
 
-    if departments:
-        await message.answer(
-            "⚠️ <b>Please use the buttons.</b> "
-            "Do not type - tap your course name from the list.",
-            parse_mode="HTML"
+    if not courses and department_id:
+        courses = await api_client.get(
+            path=f"/api/questions/discovery/courses?department_id={department_id}",
+            telegram_id=message.from_user.id,
         )
+        if courses:
+            await state.update_data(available_courses=courses)
 
+    if courses:
         from bot.keyboards.inline import course_selection_keyboard
-
         await message.answer(
-            "Select a course:",
-            reply_markup=course_selection_keyboard(
-                departments,
-                message.from_user.id
-            )
+            "⚠️ <b>Invalid Input! Please use the buttons below.</b>\n\n"
+            "Do not type text — tap your course name from the options below:",
+            parse_mode="HTML",
         )
-        return
-
-    thinking = await message.answer(
-        "<i>Loading your saved questions...</i>",
-        parse_mode="HTML"
-    )
-
-    data = await api_client.get(
-        path="/api/bookmarks",
-        telegram_id=message.from_user.id
-    )
-
-    await thinking.delete()
-
+        await message.answer(
+            "Select a course to practice:",
+            reply_markup=course_selection_keyboard(courses),
+        )
+    else:
+        await message.answer(
+            "⚠️ <b>Please use the buttons provided in the menu.</b>",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(),
+        )
 
 
 # Text message handler during exam selection
 @router.message(ExamSession.selecting_exam)
 async def handle_text_during_exam_selection(message: Message, state: FSMContext) -> None:
-    """Shows error when user types text instead of selecting exam."""
+    """Shows error when user types text instead of selecting exam, re-displays buttons."""
     if not message.from_user:
         return
-    
+
     user_data = await state.get_data()
-    courses = user_data.get("courses", [])
-    
-    if courses:
-        await message.answer(
-            "⚠️ <b>Please use the buttons</b>"
+    exams = user_data.get("available_exams")
+    department_id = user_data.get("department_id")
 
-
-            "Do not type - tap your exam year/semester from the list.",
-            parse_mode="HTML"
+    if not exams and department_id:
+        exams = await api_client.get(
+            path=f"/api/questions/discovery/department/{department_id}/exams",
+            telegram_id=message.from_user.id,
         )
+        if exams:
+            await state.update_data(available_exams=exams)
+
+    if exams:
         from bot.keyboards.inline import exam_selection_keyboard
         await message.answer(
-            "Select an exam:",
-            reply_markup=exam_selection_keyboard(courses, message.from_user.id)
+            "⚠️ <b>Invalid Input! Please use the buttons below.</b>\n\n"
+            "Do not type text — tap your exam year/semester from the options below:",
+            parse_mode="HTML",
+        )
+        await message.answer(
+            "Select an exam to start:",
+            reply_markup=exam_selection_keyboard(exams),
         )
     else:
         await message.answer(
-            "⚠️ <b>Please use the buttons</b>"
-
-
-            " ",
+            "⚠️ <b>Please use the buttons provided in the menu.</b>",
             parse_mode="HTML",
-            reply_markup=main_menu_keyboard()
+            reply_markup=main_menu_keyboard(),
         )
 
 
-# Text message handler during active session
-@router.message(ExamSession.active)
-async def handle_text_during_active_session(message: Message, state: FSMContext) -> None:
-    """Shows error when user types text during active session (not answering)."""
-    if not message.from_user:
-        return
-    
-    user_data = await state.get_data()
-    if user_data.get("mode") == "exam":
-        await message.answer(
-            "⚠️ <b>Please use the buttons below to answer.</b>\n\n"
-            "Do not type - tap A, B, C, or D on the answer buttons.",
-            parse_mode="HTML",
-            reply_markup=main_menu_keyboard()
-        )
-    else:
-        # For practice mode, show buttons to continue
-        await message.answer(
-            "⚠️ <b>Use the buttons below to continue.</b>\n\n"
-            "Do not type - tap buttons for actions.",
-            parse_mode="HTML",
-            reply_markup=main_menu_keyboard()
-        )
+MAIN_MENU_NAVIGATION_TEXTS = {
+    "📝 Exam Mode",
+    "🎯 Practice Mode",
+    "🧠 AI Tutor",
+    "📅 Study Plan",
+    "📊 My Progress",
+    "🤝 Invite Friends",
+    "📁 Saved Questions",
+    "End Chat",
+    "End Session",
+    "Stop",
+    "Cancel",
+    "Quit",
+}
 
 
-# Text message handler during exam to prevent text input
+def _is_nav_or_cmd(text: str | None) -> bool:
+    if not text:
+        return False
+    t = text.strip()
+    return t.startswith("/") or t in MAIN_MENU_NAVIGATION_TEXTS
+
+
+# Text message handler during active exam/practice question
 @router.message(ExamSession.waiting_for_answer)
+@router.message(ExamSession.active)
+@router.message(ExamSession.reviewing)
 async def handle_text_during_exam(message: Message, state: FSMContext) -> None:
-    """Shows error when user types text instead of clicking buttons during exam."""
+    """Shows error when user types text instead of clicking buttons during exam/practice session."""
     if not message.from_user:
         return
-    
+
+    # Check if user sent a command (/cancel, /start, etc.) or tapped a Main Menu reply button
+    if _is_nav_or_cmd(message.text):
+        text = message.text.strip() if message.text else ""
+        await state.set_state(None)  # Exit question state so navigation works smoothly
+
+        if text in {"/cancel", "End Session", "Stop", "Cancel", "Quit"}:
+            await message.answer(
+                "Session ended. Returning to main menu.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        if text == "📊 My Progress":
+            from bot.routers.progress import my_progress_handler
+            await my_progress_handler(message, state)
+            return
+        elif text == "🧠 AI Tutor":
+            from bot.routers.ai_tutor import ai_tutor_start_handler
+            await ai_tutor_start_handler(message, state)
+            return
+        elif text in {"📝 Exam Mode", "🎯 Practice Mode"}:
+            from bot.routers.sessions import start_session_handler
+            await start_session_handler(message, state)
+            return
+        elif text == "📁 Saved Questions":
+            from bot.routers.sessions import saved_questions_handler
+            await saved_questions_handler(message, state)
+            return
+        elif text == "🤝 Invite Friends":
+            from bot.routers.referral import referral_handler
+            await referral_handler(message, state)
+            return
+        return
+
     user_data = await state.get_data()
     question = user_data.get("question")
     session_id = user_data.get("session_id")
     mode = user_data.get("mode", "exam")
-    
+
     if question and session_id:
-        # Re-display the question with buttons
         from bot.routers.sessions import _format_question_message
         from bot.keyboards.inline import question_choices_keyboard
-        
+
+        q_id = getattr(question, "question_id", None) or (question.get("question_id") if isinstance(question, dict) else None)
+        q_opts = getattr(question, "options", None) or (question.get("options") if isinstance(question, dict) else None)
+        q_tok = getattr(question, "qtoken", None) or (question.get("qtoken") if isinstance(question, dict) else None)
+
         formatted_question = _format_question_message(question, mode)
-        await message.answer(formatted_question, parse_mode="HTML")
         await message.answer(
-            "⚠️ <b>Please use the buttons below to answer the question.</b>\n\n"
-            "Do not type your answer in the chat - tap A, B, C, or D on the answer buttons.",
-            parse_mode="HTML"
+            "⚠️ <b>Invalid Input! Please use the buttons below to answer.</b>\n\n"
+            "Do not type your answer in chat — tap A, B, C, or D on the answer buttons:",
+            parse_mode="HTML",
         )
+
+        if q_id and q_opts and q_tok:
+            kb = question_choices_keyboard(
+                q_id, q_opts, q_tok, session_id=session_id, is_practice_mode=(mode == "practice")
+            )
+        else:
+            kb = main_menu_keyboard()
+
         await message.answer(
-            "Answer the question:",
-            reply_markup=question_choices_keyboard(question, session_id, mode)
+            formatted_question,
+            parse_mode="HTML",
+            reply_markup=kb,
         )
     else:
         await message.answer(
-            "⚠️ <b>Please use the buttons below to answer the question.</b>\n\n"
-            "Do not type your answer in the chat - tap A, B, C, or D on the answer buttons.",
+            "⚠️ <b>Please use the buttons below to navigate.</b>",
             parse_mode="HTML",
-            reply_markup=main_menu_keyboard()
+            reply_markup=main_menu_keyboard(),
         )
-        await state.clear()
+
+
