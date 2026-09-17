@@ -31,7 +31,8 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     Initializes and returns the Bot and Dispatcher instances.
     """
 
-    bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+    bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML", protect_content=True))
+
 
     # Check Environment and select storage
     if settings.ENVIRONMENT.lower() in ("dev", "development") and not settings.REDIS_URL:
