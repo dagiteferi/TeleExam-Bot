@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -39,6 +40,14 @@ class ActiveSessionInfo(BaseModel):
     total_questions: int
 
 
+class RecentSession(BaseModel):
+    mode: str
+    title: str
+    score_percent: float
+    question_count: int
+    submitted_at: datetime
+
+
 class ProgressResponse(BaseModel):
     total_exams_taken: int
     total_practice_sessions: int
@@ -51,6 +60,7 @@ class ProgressResponse(BaseModel):
     recent_exam_scores: list[float]
     top_exam_scores: list[TopExamScore] = []
     active_session_info: Optional[ActiveSessionInfo] = None
+    recent_sessions: list[RecentSession] = []
 
 
 # ─── Formatting helpers ───────────────────────────────────────────────────────
@@ -137,6 +147,16 @@ def _format_progress(data: ProgressResponse) -> str:
         lines += ["", divider, "⚠️ <b>Topics Requiring Attention</b>"]
         for t in data.weak_topics:
             lines.append(f"• {t.topic_name} — <b>{t.error_count}</b> mistakes")
+
+    # Recent History
+    if data.recent_sessions:
+        lines += ["", divider, "🗓 <b>Recent History</b>"]
+        for sess in data.recent_sessions:
+            date_str = sess.submitted_at.strftime("%b %d, %Y")
+            mode_icon = "📝" if sess.mode == "exam" else "🎯"
+            # e.g. "Sep 17, 2026 - 📝 Midterm Exam"
+            lines.append(f"• {mode_icon} <b>{sess.title}</b> ({date_str})")
+            lines.append(f"    <b>{sess.question_count} Qs</b> answered — Score: <b>{sess.score_percent:.1f}%</b>")
 
     lines += ["", divider, "<i>Consistent practice leads to consistent improvement.</i>"]
     return "\n".join(lines)
