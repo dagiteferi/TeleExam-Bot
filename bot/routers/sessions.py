@@ -657,7 +657,7 @@ async def next_question_callback(callback: CallbackQuery, state: FSMContext) -> 
     await send_question(callback.message, state, session_id, callback.from_user.id)
 
 
-@router.callback_query(F.data.startswith("end_"), ExamSession.active)
+@router.callback_query(F.data.startswith("end_"))
 async def end_session_callback(callback: CallbackQuery, state: FSMContext) -> None:
     """
     Handles ending a session and displaying the final score.
@@ -673,16 +673,7 @@ async def end_session_callback(callback: CallbackQuery, state: FSMContext) -> No
     if len(parts) != 2:
         return
     session_id = parts[1]
-    user_data = await state.get_data()
-    current_session_id = user_data.get("session_id")
 
-    if not current_session_id or current_session_id != session_id:
-        await callback.message.answer(
-            "Session error. Please start a new session.",
-            reply_markup=main_menu_keyboard(),
-        )
-        await state.clear()
-        return
 
     # Submit session to backend for final scoring
     submit_data = await api_client.post(
