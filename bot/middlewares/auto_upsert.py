@@ -35,18 +35,16 @@ class AutoUpsertMiddleware(BaseMiddleware):
 
         import time
         
-        # Throttling Logic: Only upsert user info every 10 minutes to keep bot snappy
+        # Throttling Logic: Only skip upsert if we ALREADY have department_id in state and upsert was done recently
         state = data.get("state")
         if state:
             user_state = await state.get_data()
             last_upsert = user_state.get("_last_upsert", 0)
             
-            # CRITICAL OPTIMIZATION: If we already have the department_id, skip upsert entirely for high-frequency updates
-            if user_state.get("department_id") and time.time() - last_upsert < 3600: # 1 hour
+            # Only skip if department_id is ALREADY present in state and synced recently (< 10 min)
+            if user_state.get("department_id") and (time.time() - last_upsert < 600):
                 return await handler(event, data)
-            
-            if time.time() - last_upsert < 600: # 10 minutes
-                return await handler(event, data)
+
 
         # Extract referral code from /start deep link if present
         referral_code: Optional[str] = None

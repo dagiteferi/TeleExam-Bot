@@ -26,6 +26,19 @@ class WeakTopic(BaseModel):
     error_count: int
 
 
+class TopExamScore(BaseModel):
+    title: str
+    top_score_percent: float
+    total_questions: int
+
+
+class ActiveSessionInfo(BaseModel):
+    mode: str
+    title: str
+    current_question_index: int
+    total_questions: int
+
+
 class ProgressResponse(BaseModel):
     total_exams_taken: int
     total_practice_sessions: int
@@ -36,6 +49,8 @@ class ProgressResponse(BaseModel):
     course_breakdown: list[CourseProgress]
     weak_topics: list[WeakTopic]
     recent_exam_scores: list[float]
+    top_exam_scores: list[TopExamScore] = []
+    active_session_info: Optional[ActiveSessionInfo] = None
 
 
 # ─── Formatting helpers ───────────────────────────────────────────────────────
@@ -63,11 +78,25 @@ def _trend_arrow(scores: list[float]) -> str:
 def _format_progress(data: ProgressResponse) -> str:
     divider = "━" * 30
 
-    # Overall header
     lines = [
-        "<b>Your Progress Dashboard</b>",
+        "<b>📊 Your Progress Dashboard</b>",
         divider,
-        "",
+    ]
+
+    # In-Progress / Stopped Session Status
+    if data.active_session_info:
+        info = data.active_session_info
+        mode_label = "📝 Exam Mode" if info.mode == "exam" else "🎯 Practice Mode"
+        lines += [
+            "⏸ <b>Current / Paused Session</b>",
+            f"Mode: <b>{mode_label}</b>",
+            f"Content: <b>{info.title}</b>",
+            f"Stopped at: <b>Question {info.current_question_index} of {info.total_questions}</b>",
+            divider,
+        ]
+
+    # Overall header
+    lines += [
         "<b>Overall Statistics</b>",
         f"Exams taken:        <b>{data.total_exams_taken}</b>",
         f"Practice sessions:  <b>{data.total_practice_sessions}</b>",
@@ -75,9 +104,15 @@ def _format_progress(data: ProgressResponse) -> str:
         f"Correct answers:    <b>{data.total_correct}</b>",
         f"Incorrect answers:  <b>{data.total_wrong}</b>",
         "",
-        f"<b>Overall Accuracy</b>",
+        "<b>Overall Accuracy</b>",
         f"    {_accuracy_bar(data.overall_accuracy_percent)}",
     ]
+
+    # Top Exam Results
+    if data.top_exam_scores:
+        lines += ["", divider, "🏆 <b>Top Exam Results</b>"]
+        for top in data.top_exam_scores:
+            lines.append(f"• <b>{top.title}</b> — <b>{top.top_score_percent:.1f}%</b> ({top.total_questions} Qs)")
 
     # Score trend
     if data.recent_exam_scores:
@@ -105,6 +140,7 @@ def _format_progress(data: ProgressResponse) -> str:
 
     lines += ["", divider, "<i>Consistent practice leads to consistent improvement.</i>"]
     return "\n".join(lines)
+
 
 
 # ─── Handler ─────────────────────────────────────────────────────────────────

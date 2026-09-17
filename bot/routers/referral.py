@@ -64,3 +64,20 @@ async def referral_dashboard(message: Message):
     ])
 
     await message.answer(journey, parse_mode="HTML", reply_markup=keyboard)
+
+
+@router.message(F.text)
+async def fallback_text_handler(message: Message) -> None:
+    """Fallback handler for unhandled text messages. Guides the user to use menu buttons."""
+    if not message.from_user:
+        return
+
+    from bot.keyboards.reply import main_menu_keyboard
+
+    await message.answer(
+        "⚠️ <b>Unrecognized Input.</b>\n\n"
+        "Please select an option from the menu buttons below:",
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
+    )
+
