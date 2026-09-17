@@ -68,11 +68,18 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     user_data = await state.get_data()
     department_id = user_data.get("department_id")
 
-    # If state is missing department_id, check backend database explicitly
+    # Fast & fail-safe sync: If state is missing department_id, check backend database via upsert
     if not department_id:
-        user_profile = await api_client.get(
-            path="/api/users/me",
+        user_profile = await api_client.post(
+            path="/api/users/upsert",
             telegram_id=message.from_user.id,
+            payload={
+                "telegram_id": message.from_user.id,
+                "first_name": message.from_user.first_name,
+                "last_name": message.from_user.last_name,
+                "telegram_username": message.from_user.username,
+            },
+            timeout=5,
         )
         if user_profile and user_profile.get("department_id"):
             department_id = user_profile.get("department_id")
@@ -82,6 +89,7 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
                 user_id=user_profile.get("user_id"),
                 is_pro=user_profile.get("is_pro", False),
             )
+
 
     if department_id:
         # Already has department, skip straight to menu
