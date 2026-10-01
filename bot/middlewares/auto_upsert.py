@@ -41,8 +41,8 @@ class AutoUpsertMiddleware(BaseMiddleware):
             user_state = await state.get_data()
             last_upsert = user_state.get("_last_upsert", 0)
             
-            # Only skip if department_id is ALREADY present in state and synced recently (< 10 min)
-            if user_state.get("department_id") and (time.time() - last_upsert < 600):
+            # Only skip if department_id is ALREADY present in state and synced recently (< 30 sec)
+            if user_state.get("department_id") and (time.time() - last_upsert < 30):
                 return await handler(event, data)
 
 
