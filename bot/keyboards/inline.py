@@ -45,6 +45,7 @@ def session_action_keyboard(
     is_practice_mode: bool,
     question_id: Optional[str] = None,
     qtoken: Optional[str] = None,
+    is_bookmarked: bool = False,
 ) -> InlineKeyboardMarkup:
     """
     Generates an inline keyboard for session actions like "Explain with AI",
@@ -60,9 +61,10 @@ def session_action_keyboard(
             )
         )
         if question_id:
+            btn_text = "⭐️ Saved" if is_bookmarked else "🔖 Save Question"
             buttons.append(
                 InlineKeyboardButton(
-                    text="🔖 Save Question", callback_data=f"bmk_{question_id}"
+                    text=btn_text, callback_data=f"bmk_{question_id}"
                 )
             )
 

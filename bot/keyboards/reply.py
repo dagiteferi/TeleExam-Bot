@@ -18,6 +18,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(text="📁 Saved Questions"),
+                KeyboardButton(text="⭐️ Upgrade to PRO"),
             ]
         ],
         resize_keyboard=True,

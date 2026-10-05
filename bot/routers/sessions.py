@@ -34,6 +34,7 @@ class QuestionPayload(BaseModel):
     qtoken: str
     year: Optional[int] = None
     semester: Optional[str] = None
+    is_bookmarked: bool = False
 
 
 class GetQuestionResponse(BaseModel):
@@ -138,6 +139,7 @@ async def send_question(
         has_next=has_next,
         is_practice=(mode == "practice"),
         question_options=question.options,
+        is_bookmarked=question.is_bookmarked,
     )
     # Set state to waiting_for_answer so the user can actually answer the question
     await state.set_state(ExamSession.waiting_for_answer)
@@ -607,6 +609,7 @@ async def process_answer_callback(callback: CallbackQuery, state: FSMContext) ->
             is_practice_mode=is_practice,
             question_id=question_id,
             qtoken=qtoken if is_practice else None,
+            is_bookmarked=user_data.get("is_bookmarked", False),
         ),
         parse_mode="HTML",
     )
@@ -757,8 +760,19 @@ async def toggle_bookmark_callback(callback: CallbackQuery) -> None:
         
     question_id = callback.data.split("_")[1]
     
+    # Check if this was a remove action from the saved questions list
+    # or a save action from practice mode
+    current_keyboard = callback.message.reply_markup
+    is_remove = False
+    if current_keyboard and current_keyboard.inline_keyboard:
+        for row in current_keyboard.inline_keyboard:
+            for btn in row:
+                if btn.callback_data == callback.data and "Remove" in btn.text:
+                    is_remove = True
+                    break
+    
     # Show loading
-    await callback.answer("Saving question...", show_alert=False)
+    await callback.answer("Updating...", show_alert=False)
     
     response_data = await api_client.post(
         path=f"/api/bookmarks/{question_id}",
@@ -766,10 +780,38 @@ async def toggle_bookmark_callback(callback: CallbackQuery) -> None:
         payload={}
     )
     
+    import logging
+    logger = logging.getLogger(__name__)
+
     if response_data and response_data.get("success"):
-        await callback.answer(response_data.get("message", "🔖 Question Saved!"), show_alert=True)
+        message_text = response_data.get("message", "🔖 Question Bookmark Updated!")
+        await callback.answer(message_text, show_alert=True)
+        
+        # Update the UI
+        try:
+            if is_remove:
+                # If they clicked from the "Saved Questions" list, delete the message or show it's removed
+                await callback.message.edit_text("🗑 <i>This saved question has been removed.</i>", parse_mode="HTML")
+            else:
+                # If they clicked from practice mode, change the button to a Star
+                if current_keyboard and current_keyboard.inline_keyboard:
+                    new_keyboard = []
+                    for row in current_keyboard.inline_keyboard:
+                        new_row = []
+                        for btn in row:
+                            if btn.callback_data == callback.data:
+                                # Toggle the button text
+                                new_text = "⭐️ Saved" if "Save" in btn.text else "🔖 Save Question"
+                                new_row.append(InlineKeyboardButton(text=new_text, callback_data=btn.callback_data))
+                            else:
+                                new_row.append(btn)
+                        new_keyboard.append(new_row)
+                    
+                    await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=new_keyboard))
+        except Exception as e:
+            logger.error(f"Failed to update bookmark UI: {e}")
     else:
-        await callback.answer("Failed to save question. Try again.", show_alert=True)
+        await callback.answer("Failed to update bookmark. Try again.", show_alert=True)
 
 
 @router.message(F.text == "📁 Saved Questions")

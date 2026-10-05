@@ -27,3 +27,12 @@ class AIInteraction(StatesGroup):
     """
 
     chatting = State()  # User is actively chatting with the AI tutor
+
+
+class Payment(StatesGroup):
+    """
+    States for handling payment receipt upload.
+    """
+
+    uploading_screenshot = State()
+

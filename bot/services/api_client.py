@@ -150,6 +150,40 @@ class ApiClient:
         """Performs a POST request to the backend."""
         return await self._request("POST", path, telegram_id, payload, response_model, timeout=timeout)
 
+    async def post_multipart(
+        self,
+        path: str,
+        telegram_id: int,
+        form_data: aiohttp.FormData,
+        response_model: Optional[Type[T]] = None,
+        timeout: Optional[int] = None,
+    ) -> Optional[T]:
+        """Performs a POST request to the backend with multipart form data."""
+        session = await self._get_session()
+        headers = {
+            "X-Telegram-Secret": settings.BACKEND_SECRET,
+            "X-Telegram-Id": str(telegram_id),
+            # Do NOT set Content-Type for multipart/form-data; aiohttp sets it with the boundary
+        }
+        
+        request_timeout = aiohttp.ClientTimeout(total=timeout) if timeout else None
+        
+        try:
+            async with session.post(
+                path, data=form_data, headers=headers, timeout=request_timeout
+            ) as response:
+                if not response.ok:
+                    text = await response.text()
+                    print(f"API multipart request failed for {path}: {response.status}, message='{text}'")
+                    return None
+                data = await response.json()
+                if response_model:
+                    return response_model.model_validate(data)
+                return data
+        except Exception as e:
+            print(f"API multipart request error: {e}")
+            return None
+
     async def put(
         self,
         path: str,
