@@ -898,6 +898,12 @@ async def handle_text_during_course_selection(message: Message, state: FSMContex
     if not message.from_user:
         return
 
+    # If the user clicks a main menu navigation button while selecting course, exit state and route
+    if _is_nav_or_cmd(message.text):
+        await state.set_state(None)
+        await _route_nav_command(message, state)
+        return
+
     user_data = await state.get_data()
     courses = user_data.get("available_courses")
     department_id = user_data.get("department_id")
@@ -934,6 +940,12 @@ async def handle_text_during_course_selection(message: Message, state: FSMContex
 async def handle_text_during_exam_selection(message: Message, state: FSMContext) -> None:
     """Shows error when user types text instead of selecting exam, re-displays buttons."""
     if not message.from_user:
+        return
+
+    # If the user clicks a main menu navigation button while selecting exam, exit state and route
+    if _is_nav_or_cmd(message.text):
+        await state.set_state(None)
+        await _route_nav_command(message, state)
         return
 
     user_data = await state.get_data()
@@ -990,6 +1002,40 @@ def _is_nav_or_cmd(text: str | None) -> bool:
     return t.startswith("/") or t in MAIN_MENU_NAVIGATION_TEXTS
 
 
+async def _route_nav_command(message: Message, state: FSMContext) -> None:
+    text = message.text.strip() if message.text else ""
+    if text in {"/cancel", "End Session", "Stop", "Cancel", "Quit"}:
+        await message.answer(
+            "Session ended. Returning to main menu.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    if text == "📊 My Progress":
+        from bot.routers.progress import my_progress_handler
+        await my_progress_handler(message, state)
+        return
+    elif text == "🧠 AI Tutor":
+        from bot.routers.ai_tutor import ai_tutor_start_handler
+        await ai_tutor_start_handler(message, state)
+        return
+    elif text == "📅 Study Plan":
+        from bot.routers.ai_tutor import my_study_plan_handler
+        await my_study_plan_handler(message, state)
+        return
+    elif text in {"📝 Exam Mode", "🎯 Practice Mode"}:
+        from bot.routers.sessions import start_session_handler
+        await start_session_handler(message, state)
+        return
+    elif text == "📁 Saved Questions":
+        await view_bookmarks_handler(message, state)
+        return
+    elif text == "🤝 Invite Friends":
+        from bot.routers.referral import referral_dashboard
+        await referral_dashboard(message)
+        return
+
+
 # Text message handler during active exam/practice question
 @router.message(ExamSession.waiting_for_answer)
 @router.message(ExamSession.active)
@@ -1001,35 +1047,8 @@ async def handle_text_during_exam(message: Message, state: FSMContext) -> None:
 
     # Check if user sent a command (/cancel, /start, etc.) or tapped a Main Menu reply button
     if _is_nav_or_cmd(message.text):
-        text = message.text.strip() if message.text else ""
         await state.set_state(None)  # Exit question state so navigation works smoothly
-
-        if text in {"/cancel", "End Session", "Stop", "Cancel", "Quit"}:
-            await message.answer(
-                "Session ended. Returning to main menu.",
-                reply_markup=main_menu_keyboard(),
-            )
-            return
-
-        if text == "📊 My Progress":
-            from bot.routers.progress import my_progress_handler
-            await my_progress_handler(message, state)
-            return
-        elif text == "🧠 AI Tutor":
-            from bot.routers.ai_tutor import ai_tutor_start_handler
-            await ai_tutor_start_handler(message, state)
-            return
-        elif text in {"📝 Exam Mode", "🎯 Practice Mode"}:
-            from bot.routers.sessions import start_session_handler
-            await start_session_handler(message, state)
-            return
-        elif text == "📁 Saved Questions":
-            await view_bookmarks_handler(message, state)
-            return
-        elif text == "🤝 Invite Friends":
-            from bot.routers.referral import referral_dashboard
-            await referral_dashboard(message)
-            return
+        await _route_nav_command(message, state)
         return
 
     user_data = await state.get_data()
