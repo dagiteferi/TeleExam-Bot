@@ -16,26 +16,31 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-@router.message(F.text == "⭐️ Upgrade to PRO")
-async def upgrade_to_pro_menu(message: Message, state: FSMContext) -> None:
-    if not message.from_user:
-        return
+# ── Shared helper ─────────────────────────────────────────────────────────────
 
-    # Check active bank accounts from backend
+async def _send_payment_info(target, telegram_id: int) -> None:
+    """
+    Sends bank payment info to `target` (a Message object).
+    Falls back to a contact support link if no banks are configured.
+    """
     banks = await api_client.get(
         path="/api/payments/banks",
-        telegram_id=message.from_user.id,
+        telegram_id=telegram_id,
     )
 
     if not banks:
-        # Never show placeholder accounts: students would send real money to them.
-        # Only accounts configured by an admin in the backend may be displayed.
-        logger.warning("No bank accounts available from backend; payments disabled for this request")
-        await message.answer(
-            "⚠️ <b>Payments are temporarily unavailable.</b>\n\n"
-            "Please try again later. Do not send money to any account that was not shown to you here.",
+        # Fetch the configurable support contact so the user can still reach us
+        app_settings = await api_client.get_app_settings()
+        from bot.keyboards.inline import format_telegram_url
+        contact_url = format_telegram_url(app_settings.get("support_contact_url"))
+        logger.warning("No bank accounts configured; redirecting user to contact support")
+        await target.answer(
+            "⚠️ <b>Online payment is not yet configured.</b>\n\n"
+            "Please contact our support team directly to arrange your PRO upgrade.",
             parse_mode="HTML",
-            reply_markup=main_menu_keyboard(),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📞 Contact Support", url=contact_url)],
+            ]),
         )
         return
 
@@ -43,7 +48,7 @@ async def upgrade_to_pro_menu(message: Message, state: FSMContext) -> None:
     banks_text += "━━━━━━━━━━━━━━━━━━\n"
     banks_text += "Unlock unlimited AI Tutor explanations, all past exams, and premium practice sessions!\n\n"
     banks_text += "<b>💳 Payment Instructions:</b>\n"
-    banks_text += "Transfer payment to any of the bank accounts below, then send a screenshot of the receipt.\n\n"
+    banks_text += "Transfer to any bank below, then send a screenshot of the receipt.\n\n"
 
     for bank in banks:
         banks_text += f"🏦 <b>{esc(bank.get('bank_name'))}</b>\n"
@@ -56,8 +61,27 @@ async def upgrade_to_pro_menu(message: Message, state: FSMContext) -> None:
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📸 Upload Receipt Screenshot", callback_data="upload_payment_screenshot")],
     ])
+    await target.answer(banks_text, parse_mode="HTML", reply_markup=keyboard)
 
-    await message.answer(banks_text, parse_mode="HTML", reply_markup=keyboard)
+
+# ── Handlers ──────────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "buy_pro")
+async def buy_pro_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handles the 'Upgrade to PRO' inline button — routes to payment flow."""
+    await callback.answer()
+    if not callback.from_user:
+        return
+    await _send_payment_info(callback.message, callback.from_user.id)
+
+
+
+@router.message(F.text == "⭐️ Upgrade to PRO")
+async def upgrade_to_pro_menu(message: Message, state: FSMContext) -> None:
+    if not message.from_user:
+        return
+
+    await _send_payment_info(message, message.from_user.id)
 
 
 @router.callback_query(F.data == "upload_payment_screenshot")

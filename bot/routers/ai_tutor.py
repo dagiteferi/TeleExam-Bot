@@ -363,8 +363,10 @@ async def my_study_plan_handler(message: Message, state: FSMContext) -> None:
         )
         
         from bot.keyboards.inline import pro_plan_keyboard
-        # If the message contains "Upgrade to PRO", show the pro keyboard
-        reply_markup = pro_plan_keyboard() if "Upgrade to PRO" in prereq_msg else main_menu_keyboard()
+        if "Upgrade to PRO" in prereq_msg:
+            reply_markup = pro_plan_keyboard()
+        else:
+            reply_markup = main_menu_keyboard()
         
         await message.answer(
             f"ℹ️ {esc(prereq_msg)}",

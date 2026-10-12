@@ -230,15 +230,48 @@ class ApiClient:
         """Performs a PUT request to the backend."""
         return await self._request("PUT", path, telegram_id, payload, response_model, timeout=timeout)
 
-    async def delete(
+    async def get_public(
         self,
         path: str,
-        telegram_id: int,
-        response_model: Optional[Type[T]] = None,
         timeout: Optional[int] = None,
-    ) -> Optional[T]:
-        """Performs a DELETE request to the backend."""
-        return await self._request("DELETE", path, telegram_id, response_model=response_model, timeout=timeout)
+    ) -> Optional[Any]:
+        """
+        Performs a GET request to a public backend endpoint (no auth headers required).
+        """
+        session = await self._get_session()
+        request_timeout = aiohttp.ClientTimeout(total=timeout) if timeout else None
+        try:
+            async with session.get(path, timeout=request_timeout) as response:
+                if not response.ok:
+                    text = await response.text()
+                    print(f"Public API request failed for GET {path}: {response.status}, body='{text}'")
+                    return None
+                return await response.json()
+        except asyncio.TimeoutError:
+            print(f"Public API request timed out for GET {path}")
+            return None
+        except Exception as e:
+            print(f"Public API request error for GET {path}: {e}")
+            return None
+
+    # ── App Settings cache ────────────────────────────────────────────────────
+    _settings_cache: Dict[str, str] = {}
+    _settings_cache_expiry: float = 0.0
+    _SETTINGS_TTL: int = 300  # 5 minutes
+
+    async def get_app_settings(self) -> Dict[str, str]:
+        """
+        Returns the public app settings dict, fetched from /api/public/settings.
+        Results are cached for 5 minutes.
+        """
+        import time
+        if time.time() < self._settings_cache_expiry and self._settings_cache:
+            return self._settings_cache
+        data = await self.get_public("/api/public/settings", timeout=5)
+        if isinstance(data, dict):
+            self._settings_cache = data
+            self._settings_cache_expiry = time.time() + self._SETTINGS_TTL
+        return self._settings_cache or {}
 
 
 # Export a single instance for use throughout the bot

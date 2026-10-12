@@ -168,12 +168,25 @@ def course_selection_keyboard(courses: List[dict]) -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 
+def format_telegram_url(contact: str | None) -> str:
+    """Ensures contact handle, phone number, or URL is a valid Telegram HTTP link."""
+    if not contact:
+        return "https://t.me/your_support_handle"
+    contact = contact.strip()
+    if contact.startswith("http://") or contact.startswith("https://") or contact.startswith("tg://"):
+        return contact
+    if contact.startswith("@"):
+        return f"https://t.me/{contact[1:]}"
+    return f"https://t.me/{contact}"
+
+
 def pro_plan_keyboard() -> InlineKeyboardMarkup:
     """
     Generates an inline keyboard to promote the PRO plan.
     """
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💎 Upgrade to PRO", callback_data="buy_pro")],
-        [InlineKeyboardButton(text="📞 Contact Support", url="https://t.me/your_support_handle")]
+        [InlineKeyboardButton(text="💎 Upgrade to PRO", callback_data="buy_pro")]
     ])
+
+
 
