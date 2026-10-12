@@ -196,6 +196,28 @@ async def start_session_handler(message: Message, state: FSMContext) -> None:
     user_data = await state.get_data()
     department_id = user_data.get("department_id")
 
+    # Fallback: recover department_id from backend if lost from in-memory FSM state
+    if not department_id:
+        user_profile = await api_client.post(
+            path="/api/users/upsert",
+            telegram_id=message.from_user.id,
+            payload={
+                "telegram_id": message.from_user.id,
+                "first_name": message.from_user.first_name,
+                "last_name": message.from_user.last_name,
+                "telegram_username": message.from_user.username,
+            },
+            timeout=5,
+        )
+        if user_profile and user_profile.get("department_id"):
+            department_id = user_profile.get("department_id")
+            await state.update_data(
+                department_id=department_id,
+                department_name=user_profile.get("department_name"),
+                user_id=user_profile.get("user_id"),
+                is_pro=user_profile.get("is_pro", False),
+            )
+
     if not department_id:
         await message.answer(
             "It looks like you haven't selected a department yet. "
