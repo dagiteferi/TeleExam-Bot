@@ -317,7 +317,7 @@ async def process_locked_course_selection(callback: CallbackQuery) -> None:
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 
-@router.callback_query(F.data.startswith("select_course_"), ExamSession.selecting_course)
+@router.callback_query(F.data.startswith("select_course_"))
 async def process_course_selection(callback: CallbackQuery, state: FSMContext) -> None:
     """
     Handles selection of a specific course and starts a practice session.
@@ -490,7 +490,7 @@ async def back_to_exams_handler(callback: CallbackQuery, state: FSMContext) -> N
     )
 
 
-@router.callback_query(F.data.startswith("ex_"), ExamSession.selecting_exam)
+@router.callback_query(F.data.startswith("ex_"))
 async def process_exam_selection(callback: CallbackQuery, state: FSMContext) -> None:
     """
     Handles selection of a specific exam and starts the session.
@@ -547,7 +547,7 @@ async def process_exam_selection(callback: CallbackQuery, state: FSMContext) -> 
     await send_question(callback.message, state, session_id, callback.from_user.id)
 
 
-@router.callback_query(F.data.startswith("ans_"), ExamSession.waiting_for_answer)
+@router.callback_query(F.data.startswith("ans_"))
 async def process_answer_callback(callback: CallbackQuery, state: FSMContext) -> None:
     """
     Processes user's answer to a question, validates qtoken, and displays feedback.
@@ -658,7 +658,7 @@ async def process_answer_callback(callback: CallbackQuery, state: FSMContext) ->
     await answer_long(callback.message, feedback_text, reply_markup=action_keyboard, parse_mode="HTML")
 
 
-@router.callback_query(F.data.startswith("next_"), ExamSession.active)
+@router.callback_query(F.data.startswith("next_"))
 async def next_question_callback(callback: CallbackQuery, state: FSMContext) -> None:
     """
     Handles request for the next question in a session.
