@@ -1,4 +1,5 @@
 import asyncio
+import json
 from typing import Any, Dict, Optional, Type, TypeVar
 
 import aiohttp
@@ -8,6 +9,30 @@ from bot.config import settings
 
 # Type variable for Pydantic models
 T = TypeVar("T", bound=BaseModel)
+
+
+class UserBannedError(Exception):
+    """Raised when the backend rejects a request because the user is banned.
+
+    Handled centrally by the dispatcher's error handler, which tells the user.
+    """
+
+    def __init__(self, reason: Optional[str] = None, banned_until: Optional[str] = None):
+        super().__init__("user is banned")
+        self.reason = reason
+        self.banned_until = banned_until
+
+
+def _banned_error_from(status: int, text: str) -> Optional[UserBannedError]:
+    if status != 403:
+        return None
+    try:
+        error = json.loads(text).get("error", {})
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(error, dict) or error.get("code") != "user_banned":
+        return None
+    return UserBannedError(error.get("reason"), error.get("banned_until"))
 
 
 class ApiClient:
@@ -72,6 +97,9 @@ class ApiClient:
             ) as response:
                 if not response.ok:
                     text = await response.text()
+                    banned = _banned_error_from(response.status, text)
+                    if banned:
+                        raise banned
                     # Log failure for all but non-fatal 409s
                     if response.status != 409:
                         print(f"API request failed for {method} {path}: {response.status}, message='{text}', payload={payload}")
@@ -89,6 +117,8 @@ class ApiClient:
                 if response_model:
                     return response_model.model_validate(data)
                 return data
+        except UserBannedError:
+            raise
         except asyncio.TimeoutError:
             print(f"API request timed out for {method} {path}")
             return None
@@ -174,12 +204,17 @@ class ApiClient:
             ) as response:
                 if not response.ok:
                     text = await response.text()
+                    banned = _banned_error_from(response.status, text)
+                    if banned:
+                        raise banned
                     print(f"API multipart request failed for {path}: {response.status}, message='{text}'")
                     return None
                 data = await response.json()
                 if response_model:
                     return response_model.model_validate(data)
                 return data
+        except UserBannedError:
+            raise
         except Exception as e:
             print(f"API multipart request error: {e}")
             return None

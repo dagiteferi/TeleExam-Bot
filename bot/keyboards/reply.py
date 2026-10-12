@@ -1,5 +1,17 @@
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
+# Texts of the main menu buttons (must match main_menu_keyboard below)
+MAIN_MENU_TEXTS = frozenset({
+    "📝 Exam Mode",
+    "🎯 Practice Mode",
+    "🧠 AI Tutor",
+    "📅 Study Plan",
+    "📊 My Progress",
+    "🤝 Invite Friends",
+    "📁 Saved Questions",
+    "⭐️ Upgrade to PRO",
+})
+
 
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(

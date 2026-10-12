@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from bot.keyboards.reply import main_menu_keyboard
 from bot.services.api_client import api_client
+from bot.utils.text import answer_long, esc
 
 router = Router()
 
@@ -100,7 +101,7 @@ def _format_progress(data: ProgressResponse) -> str:
         lines += [
             "⏸ <b>Current / Paused Session</b>",
             f"Mode: <b>{mode_label}</b>",
-            f"Content: <b>{info.title}</b>",
+            f"Content: <b>{esc(info.title)}</b>",
             f"Stopped at: <b>Question {info.current_question_index} of {info.total_questions}</b>",
             divider,
         ]
@@ -122,7 +123,7 @@ def _format_progress(data: ProgressResponse) -> str:
     if data.top_exam_scores:
         lines += ["", divider, "🏆 <b>Top Exam Results</b>"]
         for top in data.top_exam_scores:
-            lines.append(f"• <b>{top.title}</b> — <b>{top.top_score_percent:.1f}%</b> ({top.total_questions} Qs)")
+            lines.append(f"• <b>{esc(top.title)}</b> — <b>{top.top_score_percent:.1f}%</b> ({top.total_questions} Qs)")
 
     # Score trend
     if data.recent_exam_scores:
@@ -139,14 +140,14 @@ def _format_progress(data: ProgressResponse) -> str:
     if data.course_breakdown:
         lines += ["", divider, "<b>Per-Course Accuracy</b>"]
         for c in data.course_breakdown:
-            lines.append(f"• <b>{c.course_name}</b>")
+            lines.append(f"• <b>{esc(c.course_name)}</b>")
             lines.append(f"    {_accuracy_bar(c.accuracy_percent, 8)}  ({c.correct}/{c.total_answered} correct)")
 
     # Weak topics
     if data.weak_topics:
         lines += ["", divider, "⚠️ <b>Topics Requiring Attention</b>"]
         for t in data.weak_topics:
-            lines.append(f"• {t.topic_name} — <b>{t.error_count}</b> mistakes")
+            lines.append(f"• {esc(t.topic_name)} — <b>{t.error_count}</b> mistakes")
 
     # Recent History
     if data.recent_sessions:
@@ -155,7 +156,7 @@ def _format_progress(data: ProgressResponse) -> str:
             date_str = sess.submitted_at.strftime("%b %d, %Y")
             mode_icon = "📝" if sess.mode == "exam" else "🎯"
             # e.g. "Sep 17, 2026 - 📝 Midterm Exam"
-            lines.append(f"• {mode_icon} <b>{sess.title}</b> ({date_str})")
+            lines.append(f"• {mode_icon} <b>{esc(sess.title)}</b> ({date_str})")
             lines.append(f"    <b>{sess.question_count} Qs</b> answered — Score: <b>{sess.score_percent:.1f}%</b>")
 
     lines += ["", divider, "<i>Consistent practice leads to consistent improvement.</i>"]
@@ -206,7 +207,8 @@ async def my_progress_handler(message: Message, state: FSMContext) -> None:
         )
         return
 
-    await message.answer(
+    await answer_long(
+        message,
         _format_progress(progress_data),
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),

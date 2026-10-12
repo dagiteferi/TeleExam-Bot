@@ -111,7 +111,8 @@ def department_selection_keyboard(departments: List[dict]) -> InlineKeyboardMark
 def exam_selection_keyboard(exams: List[dict]) -> InlineKeyboardMarkup:
     """
     Generates an inline keyboard for selecting an exam for the chosen department.
-    Each button's callback data will include the exam year and semester.
+    Callback data carries only the exam id: Telegram limits it to 64 bytes, so
+    year/semester (free text) are looked up from the stored exam list instead.
     Sorted by year in increasing order.
     """
     # Sort exams by year (ascending so oldest is at the top, newest at the bottom)
@@ -130,7 +131,7 @@ def exam_selection_keyboard(exams: List[dict]) -> InlineKeyboardMarkup:
             callback_data = f"locked_ex_{req_invites}"
             text = f"🔒 {year} - {semester.title()}"
         else:
-            callback_data = f"ex_{exam_id}_{year}_{semester}"
+            callback_data = f"ex_{exam_id}"
             text = f"{year} - {semester.title()}"
             
         buttons.append(

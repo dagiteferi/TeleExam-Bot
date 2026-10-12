@@ -1,20 +1,25 @@
 import asyncio
 import logging
+from datetime import datetime
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.storage.redis import RedisStorage, DefaultKeyBuilder
+from aiogram.types import ErrorEvent, ReplyKeyboardRemove
 
 from bot.config import settings
 from bot.middlewares.auto_upsert import AutoUpsertMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
-from bot.routers.ai_tutor import router as ai_tutor_router
+from bot.routers.ai_tutor import router as ai_tutor_router, chat_exit_router
 from bot.routers.onboarding import router as onboarding_router
 from bot.routers.progress import router as progress_router
 from bot.routers.sessions import router as sessions_router
 from bot.routers.referral import router as referral_router
 from bot.routers.payment import router as payment_router
-from bot.services.api_client import api_client
+from bot.keyboards.reply import main_menu_keyboard
+from bot.services.api_client import api_client, UserBannedError
+from bot.utils.text import esc
 
 
 
@@ -27,6 +32,60 @@ from pprint import pprint
 logging.basicConfig(level=logging.INFO)
 
 
+ERROR_TEXT = "⚠️ Something went wrong. Please try again, or use the menu below."
+
+
+def _banned_text(exc: UserBannedError) -> str:
+    text = "🚫 <b>Your account has been restricted by an administrator.</b>"
+    if exc.reason:
+        text += f"\n\nReason: <i>{esc(exc.reason)}</i>"
+    if exc.banned_until:
+        try:
+            until = datetime.fromisoformat(exc.banned_until).strftime("%b %d, %Y %H:%M UTC")
+        except ValueError:
+            until = exc.banned_until
+        text += f"\nAccess returns: <b>{esc(until)}</b>"
+    return text + "\n\nContact support if you believe this was a mistake."
+
+
+async def on_error(event: ErrorEvent) -> bool:
+    """Last-resort handler: log the error and make sure the student always gets a reply."""
+    exc = event.exception
+    if isinstance(exc, TelegramBadRequest) and "message is not modified" in str(exc):
+        return True
+
+    if isinstance(exc, UserBannedError):
+        reply_text = _banned_text(exc)
+        reply_markup = ReplyKeyboardRemove()
+    else:
+        logging.getLogger("bot.errors").error(
+            "Unhandled error while processing update %s", event.update.update_id, exc_info=exc
+        )
+        reply_text = ERROR_TEXT
+        reply_markup = main_menu_keyboard()
+
+    try:
+        callback = event.update.callback_query
+        message = event.update.message
+        if callback:
+            try:
+                await callback.answer()
+            except TelegramBadRequest:
+                pass  # already answered or too old
+            if callback.message:
+                # Put back the original buttons (the throttle middleware set one to "Processing...")
+                try:
+                    await callback.message.edit_reply_markup(reply_markup=callback.message.reply_markup)
+                except TelegramBadRequest:
+                    pass
+                await callback.message.answer(reply_text, reply_markup=reply_markup)
+        elif message:
+            await message.answer(reply_text, reply_markup=reply_markup)
+    except Exception:
+        logging.getLogger("bot.errors").exception("Failed to notify user about an error")
+    return True
+
+
 async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     """
     Initializes and returns the Bot and Dispatcher instances.
@@ -35,24 +94,42 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML", protect_content=True))
 
 
-    # Check Environment and select storage
-    if settings.ENVIRONMENT.lower() in ("dev", "development") and not settings.REDIS_URL:
+    # FSM storage: Redis keeps students' sessions across restarts and lets several
+    # bot instances share state. MemoryStorage is only allowed for local development.
+    is_dev = settings.ENVIRONMENT.lower() in ("dev", "development", "local")
+    if settings.REDIS_URL:
+        raw_url = settings.REDIS_URL.strip()
+    elif is_dev:
+        raw_url = None
+    else:
+        raise RuntimeError(
+            f"REDIS_URL is required when ENVIRONMENT={settings.ENVIRONMENT!r}. "
+            "Without it every restart wipes all students' sessions."
+        )
+
+    if raw_url is None:
         from aiogram.fsm.storage.memory import MemoryStorage
-        logging.info("Development environment detected and no REDIS_URL provided. Using MemoryStorage.")
+        logging.warning(
+            "Using in-memory FSM storage (ENVIRONMENT=%s, no REDIS_URL). All user state is lost on restart. "
+            "Do NOT use this in production: set ENVIRONMENT=production and REDIS_URL.",
+            settings.ENVIRONMENT,
+        )
         storage = MemoryStorage()
     else:
-        # Prioritize Prod REDIS_URL, then DEV_REDIS_URL
-        raw_url = settings.REDIS_URL.strip() if settings.REDIS_URL else settings.DEV_REDIS_URL.strip()
-        
         # Ensure raw_url has a scheme
         if not raw_url.startswith(("redis://", "rediss://", "unix://")):
             raw_url = f"redis://{raw_url}"
 
-        logging.info(f"Connecting to Redis for FSM storage...")
+        logging.info("Connecting to Redis for FSM storage...")
         storage = RedisStorage.from_url(
             raw_url,
             key_builder=DefaultKeyBuilder(with_bot_id=True, with_destiny=True),
         )
+        try:
+            await storage.redis.ping()
+        except Exception as e:
+            raise RuntimeError(f"Cannot connect to Redis for FSM storage: {e}") from e
+        logging.info("Redis FSM storage connected.")
 
     dp = Dispatcher(storage=storage)
 
@@ -62,6 +139,7 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     dp.callback_query.middleware(AutoUpsertMiddleware())
 
   
+    dp.include_router(chat_exit_router)  # must stay first
     dp.include_router(onboarding_router)
     dp.include_router(sessions_router)
     dp.include_router(ai_tutor_router)
@@ -70,6 +148,7 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     dp.include_router(referral_router)
 
 
+    dp.errors.register(on_error)
     dp.shutdown.register(api_client.close_session)
 
     return bot, dp

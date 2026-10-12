@@ -2,15 +2,38 @@ import asyncio
 from typing import Optional
 
 from aiogram import F, Router
+from aiogram.dispatcher.event.bases import SkipHandler
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
 from pydantic import BaseModel
 
-from bot.keyboards.reply import main_menu_keyboard, chat_menu_keyboard
+from bot.keyboards.reply import MAIN_MENU_TEXTS, main_menu_keyboard, chat_menu_keyboard
 from bot.services.api_client import api_client
 from bot.states.session_states import AIInteraction, ExamSession
+from bot.utils.text import answer_long, esc
 
 router = Router()
+
+# Included first in the dispatcher so it runs before every other router.
+chat_exit_router = Router()
+
+
+def _leaves_chat(text: str | None) -> bool:
+    """Menu buttons and commands (except /end_chat) end the AI chat instead of going to the AI."""
+    if not text:
+        return False
+    text = text.strip()
+    if text in MAIN_MENU_TEXTS:
+        return True
+    return text.startswith("/") and not text.startswith("/end_chat")
+
+
+@chat_exit_router.message(AIInteraction.chatting, F.text.func(_leaves_chat))
+async def leave_chat_on_navigation(message: Message, state: FSMContext) -> None:
+    """End the chat, then let the normal handler for this button/command run."""
+    await state.set_state(None)
+    raise SkipHandler()
 
 
 # ─── Pydantic models matching backend schemas ────────────────────────────────
@@ -64,7 +87,7 @@ def _format_study_plan(plan: StudyPlanDetails) -> str:
         f"<b>Your Personalized Study Plan</b>",
         divider,
         f"<b>Performance Summary</b>",
-        f"{plan.summary}",
+        f"{esc(plan.summary)}",
         f"\nExams completed: <b>{plan.total_exams_done}</b>",
         f"Average score: <b>{plan.overall_score_percent:.1f}%</b>",
         "",
@@ -74,14 +97,14 @@ def _format_study_plan(plan: StudyPlanDetails) -> str:
 
     # Weak topics
     for wt in plan.weak_topics:
-        priority_label = f"({wt.focus} Priority)"
-        lines.append(f"• <b>{wt.topic}</b> — {wt.errors} errors {priority_label}")
+        priority_label = f"({esc(wt.focus)} Priority)"
+        lines.append(f"• <b>{esc(wt.topic)}</b> — {wt.errors} errors {priority_label}")
 
     lines += ["", divider, "<b>7-Day Study Plan</b>"]
 
     # Daily plan
     for d in plan.daily_plan:
-        lines.append(f"<b>Day {d.day}:</b> {d.topic} → {d.action}")
+        lines.append(f"<b>Day {d.day}:</b> {esc(d.topic)} → {esc(d.action)}")
 
     lines += ["", divider, "<i>Adhere to this plan daily for optimal results.</i>"]
     return "\n".join(lines)
@@ -138,7 +161,7 @@ async def handle_ai_explanation(message: Message, state: FSMContext, qtoken: str
         # If the backend sent a specific explanation (like a Paywall/Pro message), display it
         error_msg = explanation_data.explanation if explanation_data and explanation_data.explanation else "⏳ The AI tutor is currently busy. Please try again in a moment."
         await message.answer(
-            error_msg,
+            esc(error_msg),
             reply_markup=main_menu_keyboard(),
         )
         return
@@ -147,17 +170,18 @@ async def handle_ai_explanation(message: Message, state: FSMContext, qtoken: str
     explanation_msg = (
         f"<b>AI Explanation</b>\n"
         f"{divider}\n\n"
-        f"{explanation_data.explanation}"
+        f"{esc(explanation_data.explanation)}"
     )
     if explanation_data.weak_topic_suggestion:
-        explanation_msg += f"\n\n{divider}\n<i>Note: {explanation_data.weak_topic_suggestion}</i>"
+        explanation_msg += f"\n\n{divider}\n<i>Note: {esc(explanation_data.weak_topic_suggestion)}</i>"
 
     # Keyboard for follow-up
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Ask Follow-up", callback_data="ai_followup")]
     ])
 
-    await message.answer(
+    await answer_long(
+        message,
         explanation_msg,
         parse_mode="HTML",
         protect_content=True,
@@ -205,16 +229,6 @@ async def ai_tutor_start_handler(message: Message, state: FSMContext) -> None:
     await state.update_data(pre_chat_state=current_state)
     await state.set_state(AIInteraction.chatting)
     
-    # Check if we have an active session to provide a back button
-    user_data = await state.get_data()
-    session_id = user_data.get("session_id")
-    
-    reply_markup = None
-    if session_id:
-        from bot.keyboards.reply import custom_reply_keyboard # I'll assume I can make one or just use message
-        # For simplicity, I'll just tell them about /end_chat or use a one-off button if I had a reply keyboard helper
-        pass
-
     await message.answer(
         "<b>AI Tutor Interface</b>\n\n"
         "Ask me any question about your studies and I will provide an explanation.\n\n"
@@ -225,6 +239,7 @@ async def ai_tutor_start_handler(message: Message, state: FSMContext) -> None:
 
 
 @router.message(AIInteraction.chatting, F.text == "End Chat")
+@router.message(AIInteraction.chatting, Command("end_chat"))
 async def ai_tutor_end_handler(message: Message, state: FSMContext) -> None:
     """Ends the AI Tutor chat session."""
     if not message.from_user:
@@ -253,7 +268,7 @@ async def ai_tutor_end_handler(message: Message, state: FSMContext) -> None:
         )
 
 
-@router.message(AIInteraction.chatting)
+@router.message(AIInteraction.chatting, ~F.text.func(_leaves_chat))
 async def ai_tutor_chat_handler(message: Message, state: FSMContext) -> None:
     """Handles ongoing chat with the AI Tutor."""
     if not message.from_user or not message.text:
@@ -283,12 +298,13 @@ async def ai_tutor_chat_handler(message: Message, state: FSMContext) -> None:
 
     if not ai_response or not ai_response.success:
         error_msg = ai_response.ai_response if ai_response and ai_response.ai_response else "⏳ My AI brain is a bit busy right now. Please try again in a moment."
-        await message.answer(error_msg)
+        await message.answer(esc(error_msg))
         return
 
     divider = "━" * 20
-    await message.answer(
-        f"{ai_response.ai_response}\n\n"
+    await answer_long(
+        message,
+        f"{esc(ai_response.ai_response)}\n\n"
         f"{divider}\n"
         f"<i>Tap End Chat or type /end_chat to exit</i>",
         parse_mode="HTML",
@@ -351,7 +367,7 @@ async def my_study_plan_handler(message: Message, state: FSMContext) -> None:
         reply_markup = pro_plan_keyboard() if "Upgrade to PRO" in prereq_msg else main_menu_keyboard()
         
         await message.answer(
-            f"ℹ️ {prereq_msg}",
+            f"ℹ️ {esc(prereq_msg)}",
             parse_mode="HTML",
             reply_markup=reply_markup,
         )
@@ -359,7 +375,8 @@ async def my_study_plan_handler(message: Message, state: FSMContext) -> None:
 
 
     formatted = _format_study_plan(study_plan_data.study_plan)
-    await message.answer(
+    await answer_long(
+        message,
         formatted,
         parse_mode="HTML",
         protect_content=True,

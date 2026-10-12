@@ -7,6 +7,7 @@ from bot.keyboards.inline import department_selection_keyboard
 from bot.keyboards.reply import main_menu_keyboard
 from bot.services.api_client import api_client
 from bot.states.session_states import Onboarding
+from bot.utils.text import esc
 
 router = Router()
 
@@ -25,20 +26,13 @@ async def handle_text_during_department_selection(message: Message, state: FSMCo
     )
     
     if departments:
-        welcome_text = (
-            f"Hello, {message.from_user.first_name}.\n\n"
-            "⚠️ <b>Please use the buttons below to select your department.</b>\n\n"
-            "Do not type - tap your department name from the list.",
-            "Please select your department below:"
-        )
-        
         await message.answer(
             "⚠️ <b>Please use the buttons below to select your department.</b>\n\n"
             "Do not type - tap your department name from the list.",
             parse_mode="HTML"
         )
         await message.answer(
-            f"Hello, {message.from_user.first_name}.\n\n"
+            f"Hello, {esc(message.from_user.first_name)}.\n\n"
             "Welcome to TeleExam AI. To customize your study experience, "
             "please select your department below:",
             reply_markup=department_selection_keyboard(departments),
@@ -94,7 +88,7 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     if department_id:
         # Already has department, skip straight to menu
         await message.answer(
-            f"Welcome back, {message.from_user.first_name}.\n\n"
+            f"Welcome back, {esc(message.from_user.first_name)}.\n\n"
             "Ready to continue studying?",
             reply_markup=main_menu_keyboard(),
         )
@@ -115,7 +109,7 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
         return
 
     welcome_text = (
-        f"Hello, {message.from_user.first_name}.\n\n"
+        f"Hello, {esc(message.from_user.first_name)}.\n\n"
         "Welcome to TeleExam AI. To customize your study experience, "
         "please select your department below:"
     )

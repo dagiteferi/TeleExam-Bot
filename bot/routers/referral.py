@@ -2,6 +2,7 @@ from aiogram import F, Router
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from bot.services.api_client import api_client
 from bot.config import settings
+from bot.utils.text import esc
 
 router = Router()
 
@@ -55,7 +56,7 @@ async def referral_dashboard(message: Message):
         for i, user in enumerate(invited_users[:10], 1):  # Show top 10
             name = user.get("first_name", "User")
             joined = user.get("created_at", "")[:10] if user.get("created_at") else "N/A"
-            journey += f"  {i}. <b>{name}</b> - {joined}\n"
+            journey += f"  {i}. <b>{esc(name)}</b> - {esc(joined)}\n"
         if len(invited_users) > 10:
             journey += f"  ... and {len(invited_users) - 10} more\n"
     

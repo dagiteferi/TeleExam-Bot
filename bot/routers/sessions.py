@@ -1,6 +1,9 @@
 from typing import Any, Dict, List, Literal, Optional
 
+import logging
+
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -15,7 +18,10 @@ from bot.keyboards.inline import (
 from bot.keyboards.reply import main_menu_keyboard
 from bot.services.api_client import api_client
 from bot.states.session_states import ExamSession
+from bot.utils.text import answer_long, esc, MAX_MESSAGE_LENGTH
 from bot.utils.watermark import embed_watermark
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -69,20 +75,20 @@ def _format_question_message(question: QuestionPayload, mode: str) -> str:
     divider = "━" * 30
 
     # Question text (bold)
-    question_text = f"<b>{question.prompt or 'No question text provided.'}</b>"
+    question_text = f"<b>{esc(question.prompt or 'No question text provided.')}</b>"
 
     # Each option on its own line
     options_lines = []
     for i, option_text in enumerate(question.options):
         label = CHOICE_LABELS[i] if i < len(CHOICE_LABELS) else str(i + 1)
-        options_lines.append(f"<b>{label})</b>  {option_text}")
+        options_lines.append(f"<b>{label})</b>  {esc(option_text)}")
 
     options_block = "\n\n".join(options_lines)
 
     # Historical Context (if available)
     context_footer = ""
     if question.year and question.semester:
-        context_footer = f"<i>Source: {question.year} - {question.semester.title()}</i>\n"
+        context_footer = f"<i>Source: {esc(question.year)} - {esc(question.semester.title())}</i>\n"
 
     clarity_link = ""
     if mode == "practice":
@@ -123,7 +129,7 @@ async def send_question(
         # Extract error message if present
         detail = question_wrapped.get("detail", question_wrapped.get("error", {}))
         msg = detail.get("message") if isinstance(detail, dict) else str(detail)
-        await message.answer(f"⚠️  {msg or 'Unexpected error fetching question.'}")
+        await message.answer(f"⚠️  {esc(msg or 'Unexpected error fetching question.')}")
         await state.clear()
         return
 
@@ -455,6 +461,7 @@ async def back_to_exams_handler(callback: CallbackQuery, state: FSMContext) -> N
         return
 
     await state.set_state(ExamSession.selecting_exam)
+    await state.update_data(available_exams=exams)
     await callback.message.edit_text(
         "Select an exam to start:",
         reply_markup=exam_selection_keyboard(exams),
@@ -472,16 +479,20 @@ async def process_exam_selection(callback: CallbackQuery, state: FSMContext) -> 
     # Always answer callback queries promptly to prevent Telegram timeout
     await callback.answer()
 
-    # Parse callback data: "ex_{id}_{year}_{semester}"
-    parts = callback.data.split("_", 3)
-    if len(parts) != 4:
+    # Parse callback data: "ex_{id}" (older buttons may still carry "_{year}_{semester}")
+    exam_id = callback.data.split("_")[1] if callback.data.count("_") >= 1 else ""
+    if not exam_id:
         return
 
-    _, exam_id, year, semester = parts
     user_data = await state.get_data()
     department_id = user_data.get("department_id")
 
-    await callback.message.edit_text(f"Starting {year} {semester.title()} exam...")
+    exam = next((e for e in user_data.get("available_exams") or [] if str(e.get("id")) == exam_id), None)
+    if exam:
+        label = f"{esc(exam.get('year'))} {esc(str(exam.get('semester') or '').title())} exam"
+    else:
+        label = "exam"
+    await callback.message.edit_text(f"Starting {label}...")
 
     res = await api_client.post(
         path="/api/sessions/start",
@@ -573,47 +584,56 @@ async def process_answer_callback(callback: CallbackQuery, state: FSMContext) ->
 
     if is_practice:
         if answer_data.is_correct:
-            result_block = f"✅ <b>Correct!</b>\nYou chose <b>{choice})</b> {selected_text}"
+            result_block = f"✅ <b>Correct!</b>\nYou chose <b>{esc(choice)})</b> {esc(selected_text)}"
         else:
             correct_letter = answer_data.correct_choice or "?"
             correct_index = ord(correct_letter) - 65 if len(correct_letter) == 1 else -1
             correct_text = question_options[correct_index] if 0 <= correct_index < len(question_options) else correct_letter
             result_block = (
                 f"❌ <b>Incorrect</b>\n"
-                f"You chose <b>{choice})</b> <s>{selected_text}</s>\n"
-                f"Correct answer: <b>{correct_letter})</b> {correct_text}"
+                f"You chose <b>{esc(choice)})</b> <s>{esc(selected_text)}</s>\n"
+                f"Correct answer: <b>{esc(correct_letter)})</b> {esc(correct_text)}"
             )
 
         if answer_data.explanation:
-            explanation_block = f"\n{divider}\n<b>Explanation</b>\n{answer_data.explanation}"
+            explanation_block = f"\n{divider}\n<b>Explanation</b>\n{esc(answer_data.explanation)}"
         else:
             explanation_block = ""
     else:
-        result_block = f"Answer <b>{choice}</b> submitted."
+        result_block = f"Answer <b>{esc(choice)}</b> submitted."
         explanation_block = ""
 
-    # Reconstruct the full message to keep question context visible
-    original_text = callback.message.text or ""
-    updated_text = (
-        f"{original_text}\n\n"
-        f"{divider}\n"
-        f"{result_block}"
-        f"{explanation_block}"
+    action_keyboard = session_action_keyboard(
+        session_id=session_id,
+        has_next_question=user_data.get("has_next", False),
+        is_practice_mode=is_practice,
+        question_id=question_id,
+        qtoken=qtoken if is_practice else None,
+        is_bookmarked=user_data.get("is_bookmarked", False),
     )
+    feedback_text = f"{divider}\n{result_block}{explanation_block}"
 
-    await callback.message.edit_text(
-        updated_text,
-        reply_markup=session_action_keyboard(
-            session_id=session_id,
-            has_next_question=user_data.get("has_next", False),
-            is_practice_mode=is_practice,
-            question_id=question_id,
-            qtoken=qtoken if is_practice else None,
-            is_bookmarked=user_data.get("is_bookmarked", False),
-        ),
-        parse_mode="HTML",
-    )
+    # Reconstruct the full message to keep question context visible.
+    # html_text keeps the original formatting and escapes the question text properly.
+    original_text = callback.message.html_text or ""
+    updated_text = f"{original_text}\n\n{feedback_text}"
+
+    # Move to the next state first so the "Next" button works even if the edit below fails
     await state.set_state(ExamSession.active)
+
+    if len(updated_text) <= MAX_MESSAGE_LENGTH:
+        try:
+            await callback.message.edit_text(updated_text, reply_markup=action_keyboard, parse_mode="HTML")
+            return
+        except TelegramBadRequest as e:
+            logger.warning("Could not edit question with feedback, sending separately: %s", e)
+
+    # Too long (or edit failed): remove the answer buttons and send feedback as a new message
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except TelegramBadRequest:
+        pass
+    await answer_long(callback.message, feedback_text, reply_markup=action_keyboard, parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("next_"), ExamSession.active)
@@ -705,7 +725,7 @@ async def end_session_callback(callback: CallbackQuery, state: FSMContext) -> No
                 await state.clear()
                 return
             
-            await callback.message.answer(f"Error finalizing session: {msg}")
+            await callback.message.answer(f"Error finalizing session: {esc(msg)}")
             return
         
         # Fallback for raw dict access if validation was skipped
@@ -737,7 +757,7 @@ async def end_session_callback(callback: CallbackQuery, state: FSMContext) -> No
         f"Score: <b>{score} / {total}</b>\n"
         f"Accuracy: <b>{pct:.1f}%</b>\n\n"
         f"{divider}\n"
-        f"<i>{submit_data.message}</i>"
+        f"<i>{esc(msg_text)}</i>"
     )
 
     await callback.message.edit_text(
@@ -854,18 +874,18 @@ async def view_bookmarks_handler(message: Message, state: FSMContext) -> None:
         correct = item.get("correct_choice")
         
         # Build block
-        block = f"<b>Q:</b> {prompt}\n\n"
-        if item.get("choice_a"): block += f"A) {item['choice_a']}\n"
-        if item.get("choice_b"): block += f"B) {item['choice_b']}\n"
-        if item.get("choice_c"): block += f"C) {item['choice_c']}\n"
-        if item.get("choice_d"): block += f"D) {item['choice_d']}\n"
+        block = f"<b>Q:</b> {esc(prompt)}\n\n"
+        if item.get("choice_a"): block += f"A) {esc(item['choice_a'])}\n"
+        if item.get("choice_b"): block += f"B) {esc(item['choice_b'])}\n"
+        if item.get("choice_c"): block += f"C) {esc(item['choice_c'])}\n"
+        if item.get("choice_d"): block += f"D) {esc(item['choice_d'])}\n"
         
-        block += f"\n🏆 <b>Correct Answer:</b> {correct}"
+        block += f"\n🏆 <b>Correct Answer:</b> {esc(correct)}"
         
         builder = InlineKeyboardBuilder()
         builder.button(text="❌ Remove Bookmark", callback_data=f"bmk_{item['question_id']}")
         
-        await message.answer(block, parse_mode="HTML", reply_markup=builder.as_markup())
+        await answer_long(message, block, parse_mode="HTML", reply_markup=builder.as_markup())
         
     if len(items) > 5:
         await message.answer(f"<i>...and {len(items)-5} more. Unsave older ones to see them here!</i>", parse_mode="HTML")
@@ -1004,12 +1024,11 @@ async def handle_text_during_exam(message: Message, state: FSMContext) -> None:
             await start_session_handler(message, state)
             return
         elif text == "📁 Saved Questions":
-            from bot.routers.sessions import saved_questions_handler
-            await saved_questions_handler(message, state)
+            await view_bookmarks_handler(message, state)
             return
         elif text == "🤝 Invite Friends":
-            from bot.routers.referral import referral_handler
-            await referral_handler(message, state)
+            from bot.routers.referral import referral_dashboard
+            await referral_dashboard(message)
             return
         return
 

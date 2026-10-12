@@ -6,9 +6,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 import aiohttp
 
-from bot.services.api_client import api_client
+from bot.services.api_client import api_client, UserBannedError
 from bot.states.session_states import Payment
 from bot.keyboards.reply import main_menu_keyboard
+from bot.utils.text import esc
 
 logger = logging.getLogger(__name__)
 
@@ -27,19 +28,16 @@ async def upgrade_to_pro_menu(message: Message, state: FSMContext) -> None:
     )
 
     if not banks:
-        # Fallback list if database has no active bank records yet
-        banks = [
-            {
-                "bank_name": "Commercial Bank of Ethiopia (CBE)",
-                "account_name": "TeleExam AI",
-                "account_number": "1000123456789",
-            },
-            {
-                "bank_name": "Telebirr",
-                "account_name": "TeleExam AI",
-                "account_number": "0911223344",
-            },
-        ]
+        # Never show placeholder accounts: students would send real money to them.
+        # Only accounts configured by an admin in the backend may be displayed.
+        logger.warning("No bank accounts available from backend; payments disabled for this request")
+        await message.answer(
+            "⚠️ <b>Payments are temporarily unavailable.</b>\n\n"
+            "Please try again later. Do not send money to any account that was not shown to you here.",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
 
     banks_text = "⭐️ <b>Upgrade to TeleExam AI PRO</b>\n"
     banks_text += "━━━━━━━━━━━━━━━━━━\n"
@@ -48,9 +46,9 @@ async def upgrade_to_pro_menu(message: Message, state: FSMContext) -> None:
     banks_text += "Transfer payment to any of the bank accounts below, then send a screenshot of the receipt.\n\n"
 
     for bank in banks:
-        banks_text += f"🏦 <b>{bank.get('bank_name')}</b>\n"
-        banks_text += f"👤 <b>Account Name:</b> {bank.get('account_name')}\n"
-        banks_text += f"🔢 <b>Account Number:</b> <code>{bank.get('account_number')}</code>\n\n"
+        banks_text += f"🏦 <b>{esc(bank.get('bank_name'))}</b>\n"
+        banks_text += f"👤 <b>Account Name:</b> {esc(bank.get('account_name'))}\n"
+        banks_text += f"🔢 <b>Account Number:</b> <code>{esc(bank.get('account_number'))}</code>\n\n"
 
     banks_text += "━━━━━━━━━━━━━━━━━━\n"
     banks_text += "Click the button below when you are ready to upload your screenshot."
@@ -123,6 +121,9 @@ async def process_screenshot_upload(message: Message, state: FSMContext) -> None
                 reply_markup=main_menu_keyboard(),
             )
             await state.set_state(None)
+    except UserBannedError:
+        await state.set_state(None)
+        raise
     except Exception as e:
         logger.exception("Error uploading payment screenshot:")
         await message.answer(
