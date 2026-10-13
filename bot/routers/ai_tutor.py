@@ -8,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
 from pydantic import BaseModel
 
+from bot.config import settings
 from bot.keyboards.reply import MAIN_MENU_TEXTS, main_menu_keyboard, chat_menu_keyboard
 from bot.services.api_client import api_client
 from bot.states.session_states import AIInteraction, ExamSession
@@ -246,7 +247,8 @@ async def ai_tutor_start_handler(message: Message, state: FSMContext) -> None:
         "• Ask one clear question per message.\n"
         "• Stuck on a practice question? Tap <b>🧠 Ask AI Tutor</b> under it — "
         "I'll explain that exact question.\n"
-        f"• Free plan: {FREE_DAILY_AI_QUESTIONS} questions per day. PRO: unlimited.\n\n"
+        f"• Free plan: {FREE_DAILY_AI_QUESTIONS} questions per day. "
+        f"PRO ({settings.PRO_PRICE_BIRR} Birr): unlimited.\n\n"
         "<i>Type your question below. Tap End Chat when you're done.</i>",
         parse_mode="HTML",
         reply_markup=chat_menu_keyboard()

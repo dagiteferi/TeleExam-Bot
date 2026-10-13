@@ -15,6 +15,7 @@ from bot.keyboards.inline import (
     question_choices_keyboard,
     session_action_keyboard,
 )
+from bot.config import settings
 from bot.keyboards.reply import MAIN_MENU_TEXTS, main_menu_keyboard
 from bot.services.api_client import api_client
 from bot.states.session_states import ExamSession
@@ -302,11 +303,14 @@ async def process_locked_course_selection(callback: CallbackQuery) -> None:
         "👇  <b>Share your invite link with friends to unlock this content:</b>\n"
         f"<code>{bot_link}</code>\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>Every friend who joins via your link counts as one invite!</i>"
+        "<i>Every friend who joins via your link counts as one invite!</i>\n\n"
+        f"💎 <b>Don't want to wait?</b> Upgrade to PRO for <b>{settings.PRO_PRICE_BIRR} Birr</b> "
+        "to unlock all exams, courses and features right away."
     )
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📢 Share Invite Link", url=share_url)],
+        [InlineKeyboardButton(text=f"💎 Unlock everything with PRO — {settings.PRO_PRICE_BIRR} Birr", callback_data="buy_pro")],
         [InlineKeyboardButton(text="⬅️ Back to Courses", callback_data="back_to_courses")],
     ])
 
@@ -398,11 +402,14 @@ async def process_locked_exam_selection(callback: CallbackQuery) -> None:
         "👇  <b>Share your invite link with friends to unlock this content:</b>\n"
         f"<code>{bot_link}</code>\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>Every friend who joins via your link counts as one invite!</i>"
+        "<i>Every friend who joins via your link counts as one invite!</i>\n\n"
+        f"💎 <b>Don't want to wait?</b> Upgrade to PRO for <b>{settings.PRO_PRICE_BIRR} Birr</b> "
+        "to unlock all exams, courses and features right away."
     )
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📢 Share Invite Link", url=share_url)],
+        [InlineKeyboardButton(text=f"💎 Unlock everything with PRO — {settings.PRO_PRICE_BIRR} Birr", callback_data="buy_pro")],
         [InlineKeyboardButton(text="⬅️ Back to Exams", callback_data="back_to_exams")],
     ])
 

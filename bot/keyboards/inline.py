@@ -2,6 +2,8 @@ from typing import List, Optional
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from bot.config import settings
+
 
 def question_choices_keyboard(
     question_id: str,
@@ -195,7 +197,7 @@ def pro_plan_keyboard() -> InlineKeyboardMarkup:
     Generates an inline keyboard to promote the PRO plan.
     """
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💎 Upgrade to PRO", callback_data="buy_pro")]
+        [InlineKeyboardButton(text=f"💎 Upgrade to PRO — {settings.PRO_PRICE_BIRR} Birr", callback_data="buy_pro")]
     ])
 
 

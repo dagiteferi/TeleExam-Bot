@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 import aiohttp
 
+from bot.config import settings
 from bot.services.api_client import api_client, UserBannedError
 from bot.states.session_states import Payment
 from bot.keyboards.reply import main_menu_keyboard
@@ -36,6 +37,7 @@ async def _send_payment_info(target, telegram_id: int) -> None:
         logger.warning("No bank accounts configured; redirecting user to contact support")
         await target.answer(
             "⚠️ <b>Online payment is not yet configured.</b>\n\n"
+            f"PRO costs <b>{settings.PRO_PRICE_BIRR} Birr</b> and unlocks all features. "
             "Please contact our support team directly to arrange your PRO upgrade.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -46,9 +48,12 @@ async def _send_payment_info(target, telegram_id: int) -> None:
 
     banks_text = "⭐️ <b>Upgrade to TeleExam AI PRO</b>\n"
     banks_text += "━━━━━━━━━━━━━━━━━━\n"
-    banks_text += "Unlock unlimited AI Tutor explanations, all past exams, and premium practice sessions!\n\n"
+    banks_text += f"💰 <b>Price: {settings.PRO_PRICE_BIRR} Birr</b> — unlocks all features:\n"
+    banks_text += "• Unlimited AI Tutor explanations and follow-ups\n"
+    banks_text += "• All past exams and practice courses\n"
+    banks_text += "• Personalized AI study plans\n\n"
     banks_text += "<b>💳 Payment Instructions:</b>\n"
-    banks_text += "Transfer to any bank below, then send a screenshot of the receipt.\n\n"
+    banks_text += f"Transfer <b>{settings.PRO_PRICE_BIRR} Birr</b> to any bank below, then send a screenshot of the receipt.\n\n"
 
     for bank in banks:
         banks_text += f"🏦 <b>{esc(bank.get('bank_name'))}</b>\n"
