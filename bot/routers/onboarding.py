@@ -1,3 +1,7 @@
+import difflib
+import re
+from typing import List
+
 from aiogram import F, Router
 from aiogram.filters import CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
@@ -15,26 +19,94 @@ router = Router()
 DEPARTMENTS_CACHE_TTL = 300
 
 
-# Text message handler during onboarding - re-display buttons
-@router.message(Onboarding.selecting_department)
+def _normalize(text: str) -> str:
+    """Lowercases, drops punctuation/emoji and collapses repeated letters ("Heyyy!!" -> "hey")."""
+    text = re.sub(r"[^\w\s]", " ", text.lower())
+    text = re.sub(r"(.)\1+", r"\1", text)
+    return " ".join(text.split())
+
+
+# Greetings (in any spelling: "heyy", "hiii", "Hello!", "ሰላም") just re-show the
+# department list without a warning. Stored normalized so they match _normalize().
+GREETINGS = {
+    _normalize(word)
+    for word in (
+        "start", "hi", "hey", "hello", "hai", "hy", "yo", "sup", "menu", "begin",
+        "good morning", "good afternoon", "good evening", "selam", "salam",
+        "tadias", "ሰላም", "ታዲያስ", "ሃይ", "ሀይ",
+    )
+}
+
+
+def _is_greeting(normalized: str) -> bool:
+    if not normalized:  # only emoji / punctuation, e.g. "👋"
+        return True
+    words = normalized.split()
+    return normalized in GREETINGS or (words[0] in GREETINGS and len(words) <= 3)
+
+
+def _matching_departments(normalized: str, departments: List[dict]) -> List[dict]:
+    """Departments whose name looks like what the user typed (e.g. "comp science")."""
+    if len(normalized) < 3:
+        return []
+    matches = []
+    for dept in departments:
+        name = _normalize(dept["name"])
+        if (
+            normalized in name
+            # Short names like "IT" must match a whole word, not part of "submit".
+            or (name in normalized if len(name) >= 4 else name in normalized.split())
+            or difflib.SequenceMatcher(None, normalized, name).ratio() >= 0.75
+        ):
+            matches.append(dept)
+    return matches[:3]
+
+
+# Text message handler during onboarding - re-display buttons.
+# Commands (e.g. /start, /start ref_XXX) are skipped here so their own handlers run.
+@router.message(
+    Onboarding.selecting_department,
+    lambda message: not (message.text or "").startswith("/"),
+)
 async def handle_text_during_department_selection(message: Message, state: FSMContext) -> None:
-    """Shows error when user types text instead of selecting department, re-displays buttons."""
+    """
+    Responds to typing during department selection:
+    greetings re-show the list, a typed department name gets a "did you mean" button,
+    and anything else gets a short warning before the list.
+    """
     if not message.from_user:
         return
-    
+
     # Get departments for re-display
     departments = await api_client.get(
         path="/api/questions/discovery/departments",
         telegram_id=message.from_user.id,
         cache_ttl=DEPARTMENTS_CACHE_TTL,
     )
-    
+
     if departments:
-        await message.answer(
-            "⚠️ <b>Please use the buttons below to select your department.</b>\n\n"
-            "Do not type - tap your department name from the list.",
-            parse_mode="HTML"
-        )
+        normalized = _normalize(message.text or message.caption or "")
+        has_text = bool(message.text or message.caption)
+
+        if has_text and not _is_greeting(normalized):
+            matches = _matching_departments(normalized, departments)
+            if matches:
+                await message.answer(
+                    "Did you mean this department? Tap it below to confirm.\n\n"
+                    "Not yours? Send /start to see all departments.",
+                    reply_markup=department_selection_keyboard(matches),
+                )
+                return
+            await message.answer(
+                "⚠️ <b>Please tap your department from the buttons below.</b>\n\n"
+                f"I couldn't match \"{esc((message.text or message.caption)[:40])}\" to a department.",
+                parse_mode="HTML"
+            )
+        elif not has_text:  # sticker, photo, voice...
+            await message.answer(
+                "⚠️ <b>Please tap your department from the buttons below.</b>",
+                parse_mode="HTML"
+            )
         await message.answer(
             f"Hello, {esc(message.from_user.full_name)}.\n\n"
             "Welcome to TeleExam AI. To customize your study experience, "
