@@ -15,7 +15,7 @@ from bot.keyboards.inline import (
     question_choices_keyboard,
     session_action_keyboard,
 )
-from bot.keyboards.reply import main_menu_keyboard
+from bot.keyboards.reply import MAIN_MENU_TEXTS, main_menu_keyboard
 from bot.services.api_client import api_client
 from bot.states.session_states import ExamSession
 from bot.utils.text import answer_long, esc, MAX_MESSAGE_LENGTH
@@ -997,14 +997,8 @@ async def handle_text_during_exam_selection(message: Message, state: FSMContext)
         )
 
 
-MAIN_MENU_NAVIGATION_TEXTS = {
-    "📝 Exam Mode",
-    "🎯 Practice Mode",
-    "🧠 AI Tutor",
-    "📅 Study Plan",
-    "📊 My Progress",
-    "🤝 Invite Friends",
-    "📁 Saved Questions",
+# Every main menu button (so new buttons are never missed) plus exit words.
+MAIN_MENU_NAVIGATION_TEXTS = set(MAIN_MENU_TEXTS) | {
     "End Chat",
     "End Session",
     "Stop",
@@ -1051,6 +1045,10 @@ async def _route_nav_command(message: Message, state: FSMContext) -> None:
     elif text == "🤝 Invite Friends":
         from bot.routers.referral import referral_dashboard
         await referral_dashboard(message)
+        return
+    elif text == "⭐️ Upgrade to PRO":
+        from bot.routers.payment import upgrade_to_pro_menu
+        await upgrade_to_pro_menu(message, state)
         return
 
 

@@ -5,7 +5,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, TelegramObject
 
 # Buttons whose handlers don't edit the tapped message, so they get no loading state.
-NO_LOADING_PREFIXES = ("locked_ex_", "locked_course_")
+NO_LOADING_PREFIXES = ("locked_ex_", "locked_course_", "buy_pro", "upload_payment_screenshot")
 
 
 class ThrottlingMiddleware(BaseMiddleware):
