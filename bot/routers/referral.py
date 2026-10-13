@@ -54,7 +54,7 @@ async def referral_dashboard(message: Message):
     if invited_users and len(invited_users) > 0:
         journey += "\n<b>👥 People You Invited:</b>\n"
         for i, user in enumerate(invited_users[:10], 1):  # Show top 10
-            name = user.get("first_name", "User")
+            name = user.get("full_name") or user.get("first_name") or "User"
             joined = user.get("created_at", "")[:10] if user.get("created_at") else "N/A"
             journey += f"  {i}. <b>{esc(name)}</b> - {esc(joined)}\n"
         if len(invited_users) > 10:

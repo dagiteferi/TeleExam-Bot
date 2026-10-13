@@ -142,8 +142,13 @@ class ApiClient:
         telegram_id: int,
         response_model: Optional[Type[T]] = None,
         timeout: Optional[int] = None,
+        cache_ttl: Optional[int] = None,
     ) -> Optional[T]:
-        """Performs a GET request to the backend with smart caching for discovery."""
+        """Performs a GET request to the backend with smart caching for discovery.
+
+        cache_ttl overrides the default TTL; only pass it for responses that are
+        the same for every user (the cache key does not include the user).
+        """
         import time
         
         # Only cache discovery endpoints to avoid stale data in exams
@@ -165,7 +170,7 @@ class ApiClient:
             # Save to cache
             # Convert result back to dict if it's a Pydantic model for safe caching
             cache_data = result.model_dump() if isinstance(result, BaseModel) else result
-            self._cache[cache_key] = (cache_data, time.time() + self._cache_ttl)
+            self._cache[cache_key] = (cache_data, time.time() + (cache_ttl or self._cache_ttl))
             
         return result
 

@@ -134,9 +134,12 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     dp = Dispatcher(storage=storage)
 
    
-    dp.message.middleware(AutoUpsertMiddleware())
-    dp.callback_query.middleware(ThrottlingMiddleware()) #
-    dp.callback_query.middleware(AutoUpsertMiddleware())
+    # One shared instance so profiles refreshed in the background on a message
+    # are applied on the next callback too (and vice versa).
+    auto_upsert = AutoUpsertMiddleware()
+    dp.message.middleware(auto_upsert)
+    dp.callback_query.middleware(ThrottlingMiddleware())
+    dp.callback_query.middleware(auto_upsert)
 
   
     dp.include_router(chat_exit_router)  # must stay first

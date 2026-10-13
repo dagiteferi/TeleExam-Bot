@@ -11,6 +11,9 @@ from bot.utils.text import esc
 
 router = Router()
 
+# Departments rarely change; cache them so /start doesn't wait on the backend.
+DEPARTMENTS_CACHE_TTL = 300
+
 
 # Text message handler during onboarding - re-display buttons
 @router.message(Onboarding.selecting_department)
@@ -23,6 +26,7 @@ async def handle_text_during_department_selection(message: Message, state: FSMCo
     departments = await api_client.get(
         path="/api/questions/discovery/departments",
         telegram_id=message.from_user.id,
+        cache_ttl=DEPARTMENTS_CACHE_TTL,
     )
     
     if departments:
@@ -32,7 +36,7 @@ async def handle_text_during_department_selection(message: Message, state: FSMCo
             parse_mode="HTML"
         )
         await message.answer(
-            f"Hello, {esc(message.from_user.first_name)}.\n\n"
+            f"Hello, {esc(message.from_user.full_name)}.\n\n"
             "Welcome to TeleExam AI. To customize your study experience, "
             "please select your department below:",
             reply_markup=department_selection_keyboard(departments),
@@ -59,36 +63,15 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
             ref_code = payload.split("_", 1)[1]
             await state.update_data(temp_ref_code=ref_code)
 
+    # AutoUpsertMiddleware has already synced this user with the backend
+    # and stored their department (if any) in state, so no extra call here.
     user_data = await state.get_data()
     department_id = user_data.get("department_id")
-
-    # Fast & fail-safe sync: If state is missing department_id, check backend database via upsert
-    if not department_id:
-        user_profile = await api_client.post(
-            path="/api/users/upsert",
-            telegram_id=message.from_user.id,
-            payload={
-                "telegram_id": message.from_user.id,
-                "first_name": message.from_user.first_name,
-                "last_name": message.from_user.last_name,
-                "telegram_username": message.from_user.username,
-            },
-            timeout=5,
-        )
-        if user_profile and user_profile.get("department_id"):
-            department_id = user_profile.get("department_id")
-            await state.update_data(
-                department_id=department_id,
-                department_name=user_profile.get("department_name"),
-                user_id=user_profile.get("user_id"),
-                is_pro=user_profile.get("is_pro", False),
-            )
-
 
     if department_id:
         # Already has department, skip straight to menu
         await message.answer(
-            f"Welcome back, {esc(message.from_user.first_name)}.\n\n"
+            f"Welcome back, {esc(message.from_user.full_name)}.\n\n"
             "Ready to continue studying?",
             reply_markup=main_menu_keyboard(),
         )
@@ -98,6 +81,7 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     departments = await api_client.get(
         path="/api/questions/discovery/departments",
         telegram_id=message.from_user.id,
+        cache_ttl=DEPARTMENTS_CACHE_TTL,
     )
 
     if not departments:
@@ -109,7 +93,7 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
         return
 
     welcome_text = (
-        f"Hello, {esc(message.from_user.first_name)}.\n\n"
+        f"Hello, {esc(message.from_user.full_name)}.\n\n"
         "Welcome to TeleExam AI. To customize your study experience, "
         "please select your department below:"
     )
