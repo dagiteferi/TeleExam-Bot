@@ -15,6 +15,10 @@ from bot.utils.text import answer_long, esc
 
 router = Router()
 
+FREE_DAILY_AI_QUESTIONS = 5  # Matches the backend's free daily chat allowance
+MAX_QUESTION_LENGTH = 1000
+GENERAL_CHAT_QUESTION_ID = "00000000-0000-0000-0000-000000000000"
+
 # Included first in the dispatcher so it runs before every other router.
 chat_exit_router = Router()
 
@@ -196,7 +200,7 @@ async def ai_followup_callback(callback: CallbackQuery, state: FSMContext) -> No
     
     # Save the current state so we can return to it later
     current_state = await state.get_state()
-    await state.update_data(pre_chat_state=current_state)
+    await state.update_data(pre_chat_state=current_state, chat_context="question")
     
     await state.set_state(AIInteraction.chatting)
     await callback.message.answer(
@@ -226,13 +230,24 @@ async def ai_tutor_start_handler(message: Message, state: FSMContext) -> None:
         return
 
     current_state = await state.get_state()
-    await state.update_data(pre_chat_state=current_state)
+    await state.update_data(pre_chat_state=current_state, chat_context="general")
     await state.set_state(AIInteraction.chatting)
-    
+
+    department_name = user_data.get("department_name")
+    for_department = f" for <b>{esc(department_name.title())}</b>" if department_name else ""
     await message.answer(
-        "<b>AI Tutor Interface</b>\n\n"
-        "Ask me any question about your studies and I will provide an explanation.\n\n"
-        "<i>Use the menu to end our conversation.</i>",
+        "🧠 <b>AI Tutor</b>\n\n"
+        f"Ask me anything about your studies{for_department} and I'll explain it simply.\n\n"
+        "💡 <b>Try asking:</b>\n"
+        "• <i>Explain [a topic from your course] in simple words</i>\n"
+        "• <i>What is the difference between [X] and [Y]?</i>\n"
+        "• <i>How should I prepare for my exit exam?</i>\n\n"
+        "📌 <b>Tips</b>\n"
+        "• Ask one clear question per message.\n"
+        "• Stuck on a practice question? Tap <b>🧠 Ask AI Tutor</b> under it — "
+        "I'll explain that exact question.\n"
+        f"• Free plan: {FREE_DAILY_AI_QUESTIONS} questions per day. PRO: unlimited.\n\n"
+        "<i>Type your question below. Tap End Chat when you're done.</i>",
         parse_mode="HTML",
         reply_markup=chat_menu_keyboard()
     )
@@ -274,9 +289,18 @@ async def ai_tutor_chat_handler(message: Message, state: FSMContext) -> None:
     if not message.from_user or not message.text:
         return
 
-    # Get question_id from state if user is in context of a question
+    if len(message.text) > MAX_QUESTION_LENGTH:
+        await message.answer(
+            f"✂️ That's a bit long. Please keep your question under {MAX_QUESTION_LENGTH} characters."
+        )
+        return
+
+    # Follow-ups are about the current practice question; the menu AI Tutor is a
+    # general study chat, sent with the all-zero id the backend treats as "no question".
     user_data = await state.get_data()
-    question_id = user_data.get("question_id", "00000000-0000-0000-0000-000000000000")
+    question_id = GENERAL_CHAT_QUESTION_ID
+    if user_data.get("chat_context") != "general":
+        question_id = user_data.get("question_id") or GENERAL_CHAT_QUESTION_ID
 
     thinking_msg = await message.answer("<i>Analyzing...</i>", parse_mode="HTML")
 
@@ -285,7 +309,7 @@ async def ai_tutor_chat_handler(message: Message, state: FSMContext) -> None:
         telegram_id=message.from_user.id,
         payload={
             "message": message.text,
-            "question_id": question_id,  # Backend requires this field
+            "question_id": question_id,
         },
         response_model=AIChatResponse,
         timeout=60,

@@ -39,6 +39,7 @@ class ActiveSessionInfo(BaseModel):
     title: str
     current_question_index: int
     total_questions: int
+    answered_count: int = 0
 
 
 class RecentSession(BaseModel):
@@ -46,6 +47,7 @@ class RecentSession(BaseModel):
     title: str
     score_percent: float
     question_count: int
+    answered_count: int = 0
     submitted_at: datetime
 
 
@@ -111,7 +113,6 @@ def _format_progress(data: ProgressResponse) -> str:
         "<b>Overall Statistics</b>",
         f"Exams taken:        <b>{data.total_exams_taken}</b>",
         f"Practice sessions:  <b>{data.total_practice_sessions}</b>",
-        f"Questions answered: <b>{data.total_questions_answered}</b>",
         f"Correct answers:    <b>{data.total_correct}</b>",
         f"Incorrect answers:  <b>{data.total_wrong}</b>",
         "",
@@ -157,7 +158,7 @@ def _format_progress(data: ProgressResponse) -> str:
             mode_icon = "📝" if sess.mode == "exam" else "🎯"
             # e.g. "Sep 17, 2026 - 📝 Midterm Exam"
             lines.append(f"• {mode_icon} <b>{esc(sess.title)}</b> ({date_str})")
-            lines.append(f"    <b>{sess.question_count} Qs</b> answered — Score: <b>{sess.score_percent:.1f}%</b>")
+            lines.append(f"    Score: <b>{sess.score_percent:.1f}%</b>")
 
     lines += ["", divider, "<i>Consistent practice leads to consistent improvement.</i>"]
     return "\n".join(lines)

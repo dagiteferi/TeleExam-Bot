@@ -108,6 +108,14 @@ def department_selection_keyboard(departments: List[dict]) -> InlineKeyboardMark
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 
 
+def department_confirmation_keyboard(dept_id: str) -> InlineKeyboardMarkup:
+    """Confirm / change buttons shown after a department is tapped during onboarding."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Confirm", callback_data=f"confirm_dept_{dept_id}")],
+        [InlineKeyboardButton(text="✏️ Change department", callback_data="change_dept")],
+    ])
+
+
 def exam_selection_keyboard(exams: List[dict]) -> InlineKeyboardMarkup:
     """
     Generates an inline keyboard for selecting an exam for the chosen department.
@@ -128,7 +136,8 @@ def exam_selection_keyboard(exams: List[dict]) -> InlineKeyboardMarkup:
         req_invites = exam.get("required_invites", 1)
         
         if is_locked:
-            callback_data = f"locked_ex_{req_invites}"
+            # Exam id keeps each button's data unique (handler reads only req_invites).
+            callback_data = f"locked_ex_{req_invites}_{exam_id}"
             text = f"🔒 {year} - {semester.title()}"
         else:
             callback_data = f"ex_{exam_id}"
@@ -155,7 +164,8 @@ def course_selection_keyboard(courses: List[dict]) -> InlineKeyboardMarkup:
         req_invites = course.get("required_invites", 4)
         
         if is_locked:
-            callback_data = f"locked_course_{req_invites}"
+            # Course id keeps each button's data unique (handler reads only req_invites).
+            callback_data = f"locked_course_{req_invites}_{course_id}"
             text = f"🔒 {course['name'].title()}"
         else:
             callback_data = f"select_course_{course_id}"

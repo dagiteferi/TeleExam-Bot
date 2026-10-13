@@ -4,6 +4,10 @@ import time
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, TelegramObject
 
+# Buttons whose handlers don't edit the tapped message, so they get no loading state.
+NO_LOADING_PREFIXES = ("locked_ex_", "locked_course_")
+
+
 class ThrottlingMiddleware(BaseMiddleware):
     """
     Middleware to prevent duplicate clicks and show a loading state.
@@ -42,8 +46,20 @@ class ThrottlingMiddleware(BaseMiddleware):
 
         # Show initial feedback ("Processing...") and change the button to loading
         try:
-            # 1. Update the button text to a loading emoji in the inline keyboard
-            if event.message and event.message.reply_markup:
+            # 1. Update the button text to a loading emoji in the inline keyboard.
+            # Skipped for locked buttons (their handler only sends an info message,
+            # so the loading text would never be replaced) and when several buttons
+            # share this callback data (we can't tell which one was tapped).
+            if (
+                event.message
+                and event.message.reply_markup
+                and not (event.data or "").startswith(NO_LOADING_PREFIXES)
+                and sum(
+                    button.callback_data == event.data
+                    for row in event.message.reply_markup.inline_keyboard
+                    for button in row
+                ) == 1
+            ):
                 keyboard = event.message.reply_markup.inline_keyboard
                 new_keyboard = []
                 found = False

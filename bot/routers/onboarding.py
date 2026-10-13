@@ -1,13 +1,13 @@
 import difflib
 import re
-from typing import List
+from typing import List, Optional
 
 from aiogram import F, Router
 from aiogram.filters import CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, User
 
-from bot.keyboards.inline import department_selection_keyboard
+from bot.keyboards.inline import department_confirmation_keyboard, department_selection_keyboard
 from bot.keyboards.reply import main_menu_keyboard
 from bot.services.api_client import api_client
 from bot.states.session_states import Onboarding
@@ -62,17 +62,30 @@ def _matching_departments(normalized: str, departments: List[dict]) -> List[dict
     return matches[:3]
 
 
-# Text message handler during onboarding - re-display buttons.
-# Commands (e.g. /start, /start ref_XXX) are skipped here so their own handlers run.
+def _is_start_command(text: str) -> bool:
+    """True for /start, /start ref_XXX and /start@BotName — those go to cmd_start."""
+    return re.match(r"^/start(@\w+)?(\s|$)", text) is not None
+
+
+def _department_prompt(full_name: str) -> str:
+    return (
+        f"Hello, {esc(full_name)}.\n\n"
+        "Welcome to TeleExam AI. To customize your study experience, "
+        "please select your department below:"
+    )
+
+
+# Any message during department selection except /start (which has its own handler).
 @router.message(
     Onboarding.selecting_department,
-    lambda message: not (message.text or "").startswith("/"),
+    lambda message: not _is_start_command(message.text or ""),
 )
 async def handle_text_during_department_selection(message: Message, state: FSMContext) -> None:
     """
     Responds to typing during department selection:
     greetings re-show the list, a typed department name gets a "did you mean" button,
-    and anything else gets a short warning before the list.
+    and commands (e.g. /computer_science) or anything else get a warning before the list.
+    Only tapping a department button can select a department.
     """
     if not message.from_user:
         return
@@ -85,34 +98,63 @@ async def handle_text_during_department_selection(message: Message, state: FSMCo
     )
 
     if departments:
-        normalized = _normalize(message.text or message.caption or "")
-        has_text = bool(message.text or message.caption)
+        text = message.text or message.caption or ""
+        normalized = _normalize(text)
 
-        if has_text and not _is_greeting(normalized):
+        if text.startswith("/"):
+            await message.answer(
+                "⚠️ <b>Commands can't be used to choose a department.</b>\n\n"
+                f"\"{esc(text[:40])}\" is not valid here. "
+                "Please tap your department from the buttons below.",
+                parse_mode="HTML"
+            )
+        elif text and not _is_greeting(normalized):
             matches = _matching_departments(normalized, departments)
             if matches:
                 await message.answer(
-                    "Did you mean this department? Tap it below to confirm.\n\n"
+                    "Did you mean this department? Tap it below to continue.\n\n"
                     "Not yours? Send /start to see all departments.",
                     reply_markup=department_selection_keyboard(matches),
                 )
                 return
             await message.answer(
                 "⚠️ <b>Please tap your department from the buttons below.</b>\n\n"
-                f"I couldn't match \"{esc((message.text or message.caption)[:40])}\" to a department.",
+                f"I couldn't match \"{esc(text[:40])}\" to a department.",
                 parse_mode="HTML"
             )
-        elif not has_text:  # sticker, photo, voice...
+        elif not text:  # sticker, photo, voice...
             await message.answer(
                 "⚠️ <b>Please tap your department from the buttons below.</b>",
                 parse_mode="HTML"
             )
         await message.answer(
-            f"Hello, {esc(message.from_user.full_name)}.\n\n"
-            "Welcome to TeleExam AI. To customize your study experience, "
-            "please select your department below:",
+            _department_prompt(message.from_user.full_name),
             reply_markup=department_selection_keyboard(departments),
         )
+
+
+# Any message while the confirmation screen is open, except /start (which restarts selection).
+@router.message(
+    Onboarding.confirming_department,
+    lambda message: not _is_start_command(message.text or ""),
+)
+async def handle_text_during_department_confirmation(message: Message, state: FSMContext) -> None:
+    """Typing is not accepted on the confirmation screen; re-sends the confirm/change buttons."""
+    if not message.from_user:
+        return
+    user_data = await state.get_data()
+    dept_id = user_data.get("pending_department_id")
+    if not dept_id:
+        # Lost the pending choice; start the selection over.
+        await state.set_state(None)
+        await message.answer("Please send /start to choose your department.")
+        return
+    await message.answer(
+        "⚠️ <b>Please use the buttons to confirm or change your department.</b>\n\n"
+        + _confirmation_text(message.from_user, user_data.get("pending_department_name")),
+        parse_mode="HTML",
+        reply_markup=department_confirmation_keyboard(dept_id),
+    )
 
 
 @router.message(CommandStart())
@@ -164,32 +206,28 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
         )
         return
 
-    welcome_text = (
-        f"Hello, {esc(message.from_user.full_name)}.\n\n"
-        "Welcome to TeleExam AI. To customize your study experience, "
-        "please select your department below:"
-    )
-    
     await state.set_state(Onboarding.selecting_department)
     await message.answer(
-        welcome_text,
+        _department_prompt(message.from_user.full_name),
         reply_markup=department_selection_keyboard(departments),
     )
 
 
-@router.callback_query(F.data.startswith("select_dept_"))
-async def process_department_selection(callback: CallbackQuery, state: FSMContext) -> None:
-    """
-    Handles department selection, saves to FSM, and confirms to user.
-    Prevents changing department if one is already set.
-    """
-    if not callback.from_user or not callback.message:
-        return
+def _confirmation_text(user: User, dept_name: Optional[str]) -> str:
+    username = f"@{esc(user.username)}" if user.username else "Not set"
+    return (
+        "<b>Please confirm your details:</b>\n\n"
+        f"👤 <b>Name:</b> {esc(user.full_name)}\n"
+        f"🔗 <b>Username:</b> {username}\n"
+        f"🎓 <b>Department:</b> {esc((dept_name or 'Unknown').title())}\n\n"
+        "⚠️ Your department <b>cannot be changed</b> after you confirm."
+    )
 
-    # Check if department is already configured for this user
+
+async def _existing_department(callback: CallbackQuery, state: FSMContext) -> Optional[str]:
+    """Returns the user's saved department, checking the backend if state doesn't know it."""
     user_data = await state.get_data()
     existing_dept_id = user_data.get("department_id")
-
     if not existing_dept_id:
         user_profile = await api_client.get(
             path="/api/users/me",
@@ -201,8 +239,31 @@ async def process_department_selection(callback: CallbackQuery, state: FSMContex
                 department_id=existing_dept_id,
                 department_name=user_profile.get("department_name"),
             )
+    return existing_dept_id
 
-    if existing_dept_id:
+
+async def _reject_if_already_set(callback: CallbackQuery, state: FSMContext) -> bool:
+    if await _existing_department(callback, state):
+        await callback.answer(
+            "Your department is already set and cannot be changed.",
+            show_alert=True,
+        )
+        await state.set_state(None)
+        return True
+    return False
+
+
+@router.callback_query(F.data.startswith("select_dept_"))
+async def process_department_selection(callback: CallbackQuery, state: FSMContext) -> None:
+    """
+    Handles a department button tap: shows the user's details and the chosen
+    department, and asks them to confirm before anything is saved.
+    """
+    if not callback.from_user or not callback.message:
+        return
+
+    user_data = await state.get_data()
+    if user_data.get("department_id"):
         await callback.answer(
             "Your department is already set and cannot be changed.",
             show_alert=True,
@@ -210,13 +271,67 @@ async def process_department_selection(callback: CallbackQuery, state: FSMContex
         await state.set_state(None)
         return
 
+    await callback.answer()
+
+    dept_id = callback.data.split("_", 2)[2]
+    departments = await api_client.get(
+        path="/api/questions/discovery/departments",
+        telegram_id=callback.from_user.id,
+        cache_ttl=DEPARTMENTS_CACHE_TTL,
+    ) or []
+    dept_name = next((d["name"] for d in departments if str(d["id"]) == dept_id), None)
+
+    await state.update_data(pending_department_id=dept_id, pending_department_name=dept_name)
+    await state.set_state(Onboarding.confirming_department)
+    await callback.message.edit_text(
+        _confirmation_text(callback.from_user, dept_name),
+        parse_mode="HTML",
+        reply_markup=department_confirmation_keyboard(dept_id),
+    )
+
+
+@router.callback_query(F.data == "change_dept")
+async def process_department_change(callback: CallbackQuery, state: FSMContext) -> None:
+    """Goes back from the confirmation screen to the full department list."""
+    if not callback.from_user or not callback.message:
+        return
+    if await _reject_if_already_set(callback, state):
+        return
+    await callback.answer()
+
+    departments = await api_client.get(
+        path="/api/questions/discovery/departments",
+        telegram_id=callback.from_user.id,
+        cache_ttl=DEPARTMENTS_CACHE_TTL,
+    )
+    if not departments:
+        await callback.message.edit_text("Couldn't load departments. Please send /start to try again.")
+        return
+
+    await state.update_data(pending_department_id=None, pending_department_name=None)
+    await state.set_state(Onboarding.selecting_department)
+    await callback.message.edit_text(
+        _department_prompt(callback.from_user.full_name),
+        reply_markup=department_selection_keyboard(departments),
+    )
+
+
+@router.callback_query(F.data.startswith("confirm_dept_"))
+async def process_department_confirmation(callback: CallbackQuery, state: FSMContext) -> None:
+    """
+    Saves the confirmed department to the backend (it is locked after this)
+    and shows the main menu. Prevents changing department if one is already set.
+    """
+    if not callback.from_user or not callback.message:
+        return
+    if await _reject_if_already_set(callback, state):
+        return
+
     # Always answer callback queries promptly to prevent Telegram timeout
     await callback.answer()
 
-    # Extract department ID from callback data
     dept_id = callback.data.split("_", 2)[2]
-
-    # Save selection in FSM state and persist to backend
+    user_data = await state.get_data()
     ref_code = user_data.get("temp_ref_code")
 
     # Explicitly update backend with the new department_id and any referral code
@@ -233,23 +348,32 @@ async def process_department_selection(callback: CallbackQuery, state: FSMContex
         },
     )
 
-    actual_dept_id = dept_id
-    dept_name = None
-    if upsert_res and upsert_res.get("department_id"):
-        actual_dept_id = upsert_res.get("department_id")
-        dept_name = upsert_res.get("department_name")
+    if not upsert_res or not upsert_res.get("department_id"):
+        # Not saved: restore the confirmation screen (the throttle middleware
+        # replaced its buttons with "Processing...") so the user can retry.
+        await callback.message.edit_text(
+            "⚠️ <b>Couldn't save your department right now. Please tap ✅ Confirm again.</b>\n\n"
+            + _confirmation_text(callback.from_user, user_data.get("pending_department_name")),
+            parse_mode="HTML",
+            reply_markup=department_confirmation_keyboard(dept_id),
+        )
+        return
 
     await state.update_data(
-        department_id=actual_dept_id,
-        department_name=dept_name,
+        department_id=upsert_res.get("department_id"),
+        department_name=upsert_res.get("department_name"),
+        pending_department_id=None,
+        pending_department_name=None,
     )
     await state.set_state(None)  # Clear onboarding state
 
     # Update message and show main menu
-    await callback.message.edit_text("Department successfully set.")
+    await callback.message.edit_text(
+        f"✅ Department set: <b>{esc((upsert_res.get('department_name') or user_data.get('pending_department_name') or '').title())}</b>",
+        parse_mode="HTML",
+    )
     await callback.message.answer(
         "Welcome to TeleExam AI. You can now access Practice Mode and Exam Mode.\n\n"
         "Please use the menu below to navigate.",
         reply_markup=main_menu_keyboard(),
     )
-

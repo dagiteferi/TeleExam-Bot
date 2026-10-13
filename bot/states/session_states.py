@@ -7,6 +7,7 @@ class Onboarding(StatesGroup):
     """
 
     selecting_department = State()
+    confirming_department = State()  # Department tapped; waiting for the user to confirm
 
 
 class ExamSession(StatesGroup):

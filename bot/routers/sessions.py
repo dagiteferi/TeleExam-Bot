@@ -90,10 +90,6 @@ def _format_question_message(question: QuestionPayload, mode: str) -> str:
     if question.year and question.semester:
         context_footer = f"<i>Source: {esc(question.year)} - {esc(question.semester.title())}</i>\n"
 
-    clarity_link = ""
-    if mode == "practice":
-        clarity_link = f" or <a href='https://t.me/TeleExamAI_bot?start=expai_{question.qtoken}'>Ask AI Tutor</a>"
-
     return (
         f"{header}\n"
         f"{divider}\n"
@@ -103,7 +99,7 @@ def _format_question_message(question: QuestionPayload, mode: str) -> str:
         f"{divider}\n\n"
         f"{options_block}\n\n"
         f"{divider}\n"
-        f"<i>👆 Tap your answer below{clarity_link}</i>"
+        f"<i>👆 Tap your answer below</i>"
     )
 
 
