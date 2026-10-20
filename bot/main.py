@@ -195,6 +195,8 @@ if __name__ == "__main__":
         print_startup_details()
         bot, dp = await get_bot_and_dispatcher()
         await start_notify_server(bot, dp)
+        from bot.notify import run_announcement_sender
+        announcement_task = asyncio.create_task(run_announcement_sender(bot, dp))  # noqa: F841 (keep a reference)
         print("Bot started in polling mode!")
         await dp.start_polling(bot)
 

@@ -6,7 +6,8 @@ from typing import Any, Awaitable, Callable, Dict, Optional, Set
 from aiogram import BaseMiddleware
 from aiogram.types import Message, TelegramObject, User
 
-from bot.keyboards.reply import MenuState, current_menu_state, main_menu_keyboard
+from bot.keyboards.reply import MENU_VERSION, MenuState, current_menu_state, main_menu_keyboard, menu_attached
+from bot.states.session_states import is_busy
 from bot.services.api_client import api_client
 
 # How often a known user's profile is re-synced with the backend.
@@ -113,15 +114,33 @@ class AutoUpsertMiddleware(BaseMiddleware):
         before = MenuState.from_profile(user_state)
         after = MenuState.from_profile({**user_state, **updates})
         current_menu_state.set(after)
+        menu_attached.set(False)
 
         result = await handler(event, data)
 
-        # PRO or dual access was granted/revoked since the last update: the reply
-        # keyboard Telegram is showing is stale, so send the menu for the new plan.
+        if not state or not data.get("bot"):
+            return result
+        # Read again: the handler may have changed the state or the plan details.
+        user_state = await state.get_data()
+        if is_busy(await state.get_state()):
+            # Never interrupt an exam, AI chat, payment upload or onboarding;
+            # a stale menu is fixed on a later, idle update.
+            if known_before and before != after:
+                await state.update_data(menu_version=0)
+            return result
+
+        # PRO or dual access was granted/revoked since the last update, or a deploy
+        # changed the menu buttons: the keyboard Telegram shows is stale.
         change_text = _plan_change(before, after) if known_before else None
-        if change_text and data.get("bot"):
+        outdated = user_state.get("menu_version") != MENU_VERSION and bool(user_state.get("department_id"))
+        if not change_text and outdated and menu_attached.get():
+            # This update's reply already carried the current menu.
+            await state.update_data(menu_version=MENU_VERSION)
+        elif change_text or outdated:
+            text = change_text or "✨ TeleExam AI has been updated. Your menu now shows the latest options."
             try:
-                await data["bot"].send_message(user.id, change_text, reply_markup=main_menu_keyboard(after))
+                await data["bot"].send_message(user.id, text, reply_markup=main_menu_keyboard(after))
+                await state.update_data(menu_version=MENU_VERSION)
             except Exception:
                 logging.warning("Failed to send updated menu to user %s.", user.id)
         return result

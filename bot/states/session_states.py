@@ -44,3 +44,25 @@ class Payment(StatesGroup):
 
     uploading_screenshot = State()
 
+
+
+# States in which the user is in the middle of something (an exam, an AI chat, a
+# payment upload, onboarding...). Announcements and menu refreshes wait until the
+# user leaves them, so nothing interrupts what they are doing.
+BUSY_STATES = frozenset({
+    Onboarding.selecting_department.state,
+    Onboarding.confirming_department.state,
+    DualDegree.selecting_department.state,
+    DualDegree.confirming_department.state,
+    ExamSession.selecting_exam.state,
+    ExamSession.selecting_course.state,
+    ExamSession.active.state,
+    ExamSession.waiting_for_answer.state,
+    ExamSession.reviewing.state,
+    AIInteraction.chatting.state,
+    Payment.uploading_screenshot.state,
+})
+
+
+def is_busy(state_name: str | None) -> bool:
+    return state_name in BUSY_STATES

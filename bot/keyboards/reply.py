@@ -20,6 +20,14 @@ class MenuState:
         )
 
 
+# Bump this whenever the main menu buttons change in a deploy. Users whose saved
+# menu_version is older get the new menu once, automatically, when they are idle.
+MENU_VERSION = 2
+
+# Set to True whenever a main menu is built while handling an update, so the
+# middleware knows the user already received the current menu.
+menu_attached: ContextVar[bool] = ContextVar("menu_attached", default=False)
+
 # Menu state of the user whose update is being handled. Set per update by
 # AutoUpsertMiddleware so every main menu matches the user's current plan.
 current_menu_state: ContextVar[MenuState] = ContextVar("current_menu_state", default=MenuState())
@@ -47,6 +55,7 @@ def main_menu_keyboard(menu: Optional[MenuState] = None) -> ReplyKeyboardMarkup:
     """
     if menu is None:
         menu = current_menu_state.get()
+    menu_attached.set(True)
     keyboard = [
         [
             KeyboardButton(text="📝 Exam Mode"),

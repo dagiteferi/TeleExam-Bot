@@ -8,7 +8,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 
 from bot.config import settings
 from bot.main import get_bot_and_dispatcher
-from bot.notify import make_notify_handler
+from bot.notify import make_notify_handler, run_announcement_sender
 from bot.services.api_client import api_client
 
 # Configure logging
@@ -46,6 +46,8 @@ async def start_webhook_server() -> None:
 
     # Register startup and shutdown hooks for webhook specific actions
     dp.startup.register(on_startup_webhook)
+    # Deliver admin announcements in the background (kept referenced so it isn't garbage-collected)
+    announcement_task = asyncio.create_task(run_announcement_sender(bot, dp))
     dp.shutdown.register(on_shutdown_webhook)
 
     # Create aiohttp web application
