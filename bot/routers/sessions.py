@@ -223,34 +223,45 @@ async def start_session_handler(message: Message, state: FSMContext) -> None:
         )
         return
 
+    await _show_mode_options(message, state, mode)
+
+
+async def _show_mode_options(message: Message, state: FSMContext, mode: str) -> None:
+    """Lists the exams (exam mode) or courses (practice mode) of the department being studied."""
+    user_data = await state.get_data()
+    department_id = _study_department_id(user_data)
+    telegram_id = message.chat.id
+
+    # Dual-degree students switch departments, so say which one this list is for.
+    header = ""
+    if user_data.get("has_dual_access"):
+        name = user_data.get("active_department_name") or user_data.get("department_name") or ""
+        header = f"📚 <b>{esc(name.title())}</b> (change with 🔄 Switch Department)\n\n"
+
     if mode == "exam":
-        # Fetch available exams for the department
         exams = await api_client.get(
             path=f"/api/questions/discovery/department/{department_id}/exams",
-            telegram_id=message.from_user.id,
+            telegram_id=telegram_id,
         )
 
         if not exams:
             await message.answer(
-                "Currently, there are no exams available for your department.",
+                "Currently, there are no exams available for this department.",
                 reply_markup=main_menu_keyboard(),
             )
             return
 
-        import logging
-        logging.getLogger(__name__).info(f"============ BOT RECEIVED EXAMS: {exams} ============")
-
         await state.set_state(ExamSession.selecting_exam)
         await state.update_data(available_exams=exams)
         await message.answer(
-            "Select an exam to start:",
+            f"{header}Select an exam to start:",
+            parse_mode="HTML",
             reply_markup=exam_selection_keyboard(exams),
         )
     else:
-        # Fetch available courses for the department (Discovery)
         courses = await api_client.get(
             path=f"/api/questions/discovery/courses?department_id={department_id}",
-            telegram_id=message.from_user.id,
+            telegram_id=telegram_id,
         )
 
         if not courses:
@@ -263,10 +274,24 @@ async def start_session_handler(message: Message, state: FSMContext) -> None:
         await state.set_state(ExamSession.selecting_course)
         await state.update_data(available_courses=courses)
         await message.answer(
-            "Select a course to practice:",
+            f"{header}Select a course to practice:",
+            parse_mode="HTML",
             reply_markup=course_selection_keyboard(courses),
         )
 
+
+async def _current_department_line(state: FSMContext) -> str:
+    """'📚 Department: X' line for the department open now (empty if unknown)."""
+    user_data = await state.get_data()
+    name = user_data.get("active_department_name") or user_data.get("department_name")
+    return f"📚 Department: <b>{esc(name.title())}</b>\n\n" if name else ""
+
+
+def _study_department_id(user_data: Dict[str, Any]) -> Optional[str]:
+    """The department being studied: the active one for dual-degree students, else the main one."""
+    if user_data.get("has_dual_access") and user_data.get("active_department_id"):
+        return user_data["active_department_id"]
+    return user_data.get("department_id")
 
 
 @router.callback_query(F.data.startswith("locked_course_"))
@@ -331,7 +356,7 @@ async def process_course_selection(callback: CallbackQuery, state: FSMContext) -
     # Extract course ID from callback data
     course_id = callback.data.split("_", 2)[2]
     user_data = await state.get_data()
-    department_id = user_data.get("department_id")
+    department_id = _study_department_id(user_data)
 
     await callback.message.edit_text("Initializing practice session...")
 
@@ -428,7 +453,7 @@ async def back_to_courses_handler(callback: CallbackQuery, state: FSMContext) ->
     await callback.answer()
 
     user_data = await state.get_data()
-    department_id = user_data.get("department_id")
+    department_id = _study_department_id(user_data)
 
     if not department_id:
         await callback.message.edit_text(
@@ -466,7 +491,7 @@ async def back_to_exams_handler(callback: CallbackQuery, state: FSMContext) -> N
     await callback.answer()
 
     user_data = await state.get_data()
-    department_id = user_data.get("department_id")
+    department_id = _study_department_id(user_data)
 
     if not department_id:
         await callback.message.edit_text(
@@ -510,7 +535,7 @@ async def process_exam_selection(callback: CallbackQuery, state: FSMContext) -> 
         return
 
     user_data = await state.get_data()
-    department_id = user_data.get("department_id")
+    department_id = _study_department_id(user_data)
 
     exam = next((e for e in user_data.get("available_exams") or [] if str(e.get("id")) == exam_id), None)
     if exam:
@@ -877,10 +902,13 @@ async def view_bookmarks_handler(message: Message, state: FSMContext) -> None:
         await thinking.delete()
     except:
         pass
-        
+
+    # Saved questions are kept per department; say which one is open now.
+    dept_line = await _current_department_line(state)
+
     if not data or not data.get("items"):
         await message.answer(
-            "You don't have any saved questions yet.\n\n"
+            f"{dept_line}You don't have any saved questions yet.\n\n"
             "While in <b>Practice Mode</b>, tap <b>🔖 Save Question</b> to bookmark difficult questions here for later review!",
             parse_mode="HTML",
             reply_markup=main_menu_keyboard()
@@ -890,7 +918,7 @@ async def view_bookmarks_handler(message: Message, state: FSMContext) -> None:
     items = data.get("items", [])
     
     # Format bookmarks nicely (send a few as rich text, limit to 5 per message to avoid floods)
-    await message.answer(f"📚 <b>Your Saved Questions</b> ({len(items)} total)\n\n<i>Here are your most recently saved questions. Review them carefully!</i>", parse_mode="HTML")
+    await message.answer(f"{dept_line}📁 <b>Your Saved Questions</b> ({len(items)} total)\n\n<i>Here are your most recently saved questions. Review them carefully!</i>", parse_mode="HTML")
     
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     
@@ -931,7 +959,7 @@ async def handle_text_during_course_selection(message: Message, state: FSMContex
 
     user_data = await state.get_data()
     courses = user_data.get("available_courses")
-    department_id = user_data.get("department_id")
+    department_id = _study_department_id(user_data)
 
     if not courses and department_id:
         courses = await api_client.get(
@@ -975,7 +1003,7 @@ async def handle_text_during_exam_selection(message: Message, state: FSMContext)
 
     user_data = await state.get_data()
     exams = user_data.get("available_exams")
-    department_id = user_data.get("department_id")
+    department_id = _study_department_id(user_data)
 
     if not exams and department_id:
         exams = await api_client.get(
@@ -1056,6 +1084,14 @@ async def _route_nav_command(message: Message, state: FSMContext) -> None:
     elif text == "⭐️ Upgrade to PRO":
         from bot.routers.payment import upgrade_to_pro_menu
         await upgrade_to_pro_menu(message, state)
+        return
+    elif text == "🎓 Dual Degree":
+        from bot.routers.dual_degree import dual_degree_menu
+        await dual_degree_menu(message, state)
+        return
+    elif text == "🔄 Switch Department":
+        from bot.routers.dual_degree import switch_department_menu
+        await switch_department_menu(message, state)
         return
 
 

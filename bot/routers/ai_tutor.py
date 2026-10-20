@@ -83,13 +83,16 @@ class StudyPlanResponse(BaseModel):
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
-def _format_study_plan(plan: StudyPlanDetails) -> str:
+def _format_study_plan(plan: StudyPlanDetails, department_name: Optional[str] = None) -> str:
     """Formats a study plan into a beautiful, readable Telegram message."""
     divider = "━" * 30
 
     # Header
-    lines = [
-        f"<b>Your Personalized Study Plan</b>",
+    lines = [f"<b>Your Personalized Study Plan</b>"]
+    if department_name:
+        # Dual-degree students get a separate plan per department.
+        lines.append(f"📚 Department: <b>{esc(department_name.title())}</b>")
+    lines += [
         divider,
         f"<b>Performance Summary</b>",
         f"{esc(plan.summary)}",
@@ -234,7 +237,7 @@ async def ai_tutor_start_handler(message: Message, state: FSMContext) -> None:
     await state.update_data(pre_chat_state=current_state, chat_context="general")
     await state.set_state(AIInteraction.chatting)
 
-    department_name = user_data.get("department_name")
+    department_name = user_data.get("active_department_name") or user_data.get("department_name")
     for_department = f" for <b>{esc(department_name.title())}</b>" if department_name else ""
     await message.answer(
         "🧠 <b>AI Tutor</b>\n\n"
@@ -402,7 +405,8 @@ async def my_study_plan_handler(message: Message, state: FSMContext) -> None:
         return
 
 
-    formatted = _format_study_plan(study_plan_data.study_plan)
+    department_name = user_data.get("active_department_name") or user_data.get("department_name")
+    formatted = _format_study_plan(study_plan_data.study_plan, department_name)
     await answer_long(
         message,
         formatted,

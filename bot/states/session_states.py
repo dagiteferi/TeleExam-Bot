@@ -10,6 +10,13 @@ class Onboarding(StatesGroup):
     confirming_department = State()  # Department tapped; waiting for the user to confirm
 
 
+class DualDegree(StatesGroup):
+    """States for choosing and unlocking a second department."""
+
+    selecting_department = State()
+    confirming_department = State()
+
+
 class ExamSession(StatesGroup):
     """
     States for managing an active exam, practice, or quiz session.

@@ -6,6 +6,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional, Set
 from aiogram import BaseMiddleware
 from aiogram.types import Message, TelegramObject, User
 
+from bot.keyboards.reply import MenuState, current_menu_state, main_menu_keyboard
 from bot.services.api_client import api_client
 
 # How often a known user's profile is re-synced with the backend.
@@ -19,9 +20,39 @@ def profile_from_response(user_response: Dict[str, Any]) -> Dict[str, Any]:
         "department_id": user_response.get("department_id"),
         "department_name": user_response.get("department_name"),
         "is_pro": user_response.get("is_pro", False),
+        "is_full_access": user_response.get("is_full_access", False),
         "invite_code": user_response.get("invite_code"),
         "invite_count": user_response.get("invite_count", 0),
+        "secondary_department_id": user_response.get("secondary_department_id"),
+        "secondary_department_name": user_response.get("secondary_department_name"),
+        "secondary_department_unlocked": user_response.get("secondary_department_unlocked", False),
+        "has_dual_access": user_response.get("has_dual_access", False),
+        "active_department_id": user_response.get("active_department_id") or user_response.get("department_id"),
+        "active_department_name": user_response.get("active_department_name") or user_response.get("department_name"),
     }
+
+
+# Sent when a plan change makes the menu the user is looking at stale.
+_PLAN_CHANGE_MESSAGES = {
+    "dual_on": "🎓 Your Dual Degree is active. Tap 🔄 Switch Department to move between your departments.",
+    "dual_off": "Your second department is locked again, so you are back in your main department.",
+    "pro_on": "⭐️ Your PRO plan is active. Your menu has been updated.",
+    "pro_off": "Your PRO plan has ended. You can upgrade again from the menu.",
+    "pro_and_dual_off": (
+        "Your PRO plan has ended, so your second department is locked too. "
+        "You can upgrade again from the menu."
+    ),
+}
+
+
+def _plan_change(before: MenuState, after: MenuState) -> Optional[str]:
+    if before == after:
+        return None
+    if before.is_pro and not after.is_pro:
+        return _PLAN_CHANGE_MESSAGES["pro_and_dual_off" if before.has_dual_access else "pro_off"]
+    if after.has_dual_access != before.has_dual_access:
+        return _PLAN_CHANGE_MESSAGES["dual_on" if after.has_dual_access else "dual_off"]
+    return _PLAN_CHANGE_MESSAGES["pro_on" if after.is_pro else "pro_off"]
 
 
 class AutoUpsertMiddleware(BaseMiddleware):
@@ -62,25 +93,38 @@ class AutoUpsertMiddleware(BaseMiddleware):
                 task = asyncio.create_task(self._refresh_in_background(user.id, payload))
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
-            if updates and state:
-                await state.update_data(**updates)
-            return await handler(event, data)
-
-        # New or not-yet-synced user: the handler needs the backend profile now.
-        user_response = await api_client.post(
-            path="/api/users/upsert",
-            telegram_id=user.id,
-            payload=payload,
-            timeout=10,
-        )
-        if user_response:
-            updates.update(profile_from_response(user_response), _last_upsert=time.time())
         else:
-            logging.warning("Failed to upsert user %s to backend.", user.id)
+            # New or not-yet-synced user: the handler needs the backend profile now.
+            user_response = await api_client.post(
+                path="/api/users/upsert",
+                telegram_id=user.id,
+                payload=payload,
+                timeout=10,
+            )
+            if user_response:
+                updates.update(profile_from_response(user_response), _last_upsert=time.time())
+            else:
+                logging.warning("Failed to upsert user %s to backend.", user.id)
+
         if updates and state:
             await state.update_data(**updates)
 
-        return await handler(event, data)
+        known_before = "is_pro" in user_state
+        before = MenuState.from_profile(user_state)
+        after = MenuState.from_profile({**user_state, **updates})
+        current_menu_state.set(after)
+
+        result = await handler(event, data)
+
+        # PRO or dual access was granted/revoked since the last update: the reply
+        # keyboard Telegram is showing is stale, so send the menu for the new plan.
+        change_text = _plan_change(before, after) if known_before else None
+        if change_text and data.get("bot"):
+            try:
+                await data["bot"].send_message(user.id, change_text, reply_markup=main_menu_keyboard(after))
+            except Exception:
+                logging.warning("Failed to send updated menu to user %s.", user.id)
+        return result
 
     async def _refresh_in_background(self, telegram_id: int, payload: Dict[str, Any]) -> None:
         user_response = await api_client.post(

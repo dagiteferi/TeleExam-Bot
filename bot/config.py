@@ -26,7 +26,8 @@ class Settings(BaseSettings):
     HOST: str = Field("0.0.0.0", description="Host address for the aiohttp server")
     PORT: int = Field(8080, description="Port for the aiohttp server")
     
-    PRO_PRICE_BIRR: int = Field(300, description="Price of PRO in Birr, shown in every upgrade message")
+    PRO_PRICE_BIRR: int = Field(..., description="Price of PRO in Birr, shown in every upgrade message")
+    DUAL_DEPT_PRICE_BIRR: int = Field(..., description="Extra fee to unlock a second department for dual-degree students")
 
     ENVIRONMENT: str = Field("development", description="Environment mode: 'development' or 'production'")
     REDIS_URL: Optional[str] = Field(None, description="Prod Redis URL for FSM storage.")

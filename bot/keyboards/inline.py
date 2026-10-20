@@ -91,15 +91,22 @@ def session_action_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 
 
-def department_selection_keyboard(departments: List[dict]) -> InlineKeyboardMarkup:
+def department_selection_keyboard(
+    departments: List[dict],
+    *,
+    exclude_ids: Optional[List[str]] = None,
+    callback_prefix: str = "select_dept_",
+) -> InlineKeyboardMarkup:
     """
     Generates an inline keyboard for selecting a department during onboarding.
     Each button's callback data will include the department ID.
     """
+    skip = {str(x) for x in (exclude_ids or [])}
     buttons = []
     for dept in departments:
-        # Callback data format: "select_dept_{dept_id}"
-        callback_data = f"select_dept_{dept['id']}"
+        if str(dept["id"]) in skip:
+            continue
+        callback_data = f"{callback_prefix}{dept['id']}"
         buttons.append(
             InlineKeyboardButton(text=dept["name"].title(), callback_data=callback_data)
         )
@@ -115,6 +122,23 @@ def department_confirmation_keyboard(dept_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Confirm", callback_data=f"confirm_dept_{dept_id}")],
         [InlineKeyboardButton(text="✏️ Change department", callback_data="change_dept")],
+    ])
+
+
+def dual_department_confirmation_keyboard(dept_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Confirm", callback_data=f"confirm_dual_dept_{dept_id}")],
+        [InlineKeyboardButton(text="✏️ Change department", callback_data="change_dual_dept")],
+    ])
+
+
+def dual_pay_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"💳 Pay {settings.DUAL_DEPT_PRICE_BIRR} Birr to unlock",
+            callback_data="pay_dual",
+        )],
+        [InlineKeyboardButton(text="✏️ Change second department", callback_data="change_dual_dept")],
     ])
 
 

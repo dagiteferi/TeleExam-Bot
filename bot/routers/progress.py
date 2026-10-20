@@ -52,6 +52,7 @@ class RecentSession(BaseModel):
 
 
 class ProgressResponse(BaseModel):
+    department_name: Optional[str] = None
     total_exams_taken: int
     total_practice_sessions: int
     overall_accuracy_percent: float
@@ -91,10 +92,10 @@ def _trend_arrow(scores: list[float]) -> str:
 def _format_progress(data: ProgressResponse) -> str:
     divider = "━" * 30
 
-    lines = [
-        "<b>📊 Your Progress Dashboard</b>",
-        divider,
-    ]
+    lines = ["<b>📊 Your Progress Dashboard</b>"]
+    if data.department_name:
+        lines.append(f"📚 Department: <b>{esc(data.department_name.title())}</b>")
+    lines.append(divider)
 
     # In-Progress / Stopped Session Status
     if data.active_session_info:

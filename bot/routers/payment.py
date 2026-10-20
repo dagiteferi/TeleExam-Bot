@@ -9,7 +9,7 @@ import aiohttp
 from bot.config import settings
 from bot.services.api_client import api_client, UserBannedError
 from bot.states.session_states import Payment
-from bot.keyboards.reply import main_menu_keyboard
+from bot.keyboards.reply import MenuState, main_menu_keyboard
 from bot.utils.text import esc
 
 logger = logging.getLogger(__name__)
@@ -19,11 +19,25 @@ router = Router()
 
 # ── Shared helper ─────────────────────────────────────────────────────────────
 
-async def _send_payment_info(target, telegram_id: int) -> None:
+async def _send_payment_info(target, telegram_id: int, kind: str = "pro") -> None:
     """
     Sends bank payment info to `target` (a Message object).
     Falls back to a contact support link if no banks are configured.
     """
+    is_dual = kind == "dual_department"
+    price = settings.DUAL_DEPT_PRICE_BIRR if is_dual else settings.PRO_PRICE_BIRR
+
+    if not is_dual:
+        # An old menu or inline button can still offer PRO to someone who already has it.
+        profile = await api_client.get(path="/api/users/me", telegram_id=telegram_id)
+        if profile and profile.get("is_pro"):
+            await target.answer(
+                "✅ You are already <b>PRO</b> — all features are unlocked.",
+                parse_mode="HTML",
+                reply_markup=main_menu_keyboard(MenuState.from_profile(profile)),
+            )
+            return
+
     banks = await api_client.get(
         path="/api/payments/banks",
         telegram_id=telegram_id,
@@ -37,7 +51,7 @@ async def _send_payment_info(target, telegram_id: int) -> None:
         logger.warning("No bank accounts configured; redirecting user to contact support")
         await target.answer(
             "⚠️ <b>Online payment is not yet configured.</b>\n\n"
-            f"PRO costs <b>{settings.PRO_PRICE_BIRR} Birr</b> and unlocks all features. "
+            f"{'Dual department' if is_dual else 'PRO'} costs <b>{price} Birr</b>. "
             "Please contact our support team directly to arrange your PRO upgrade.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -46,14 +60,22 @@ async def _send_payment_info(target, telegram_id: int) -> None:
         )
         return
 
-    banks_text = "⭐️ <b>Upgrade to TeleExam AI PRO</b>\n"
-    banks_text += "━━━━━━━━━━━━━━━━━━\n"
-    banks_text += f"💰 <b>Price: {settings.PRO_PRICE_BIRR} Birr</b> — unlocks all features:\n"
-    banks_text += "• Unlimited AI Tutor explanations and follow-ups\n"
-    banks_text += "• All past exams and practice courses\n"
-    banks_text += "• Personalized AI study plans\n\n"
+    if is_dual:
+        banks_text = "🎓 <b>Unlock your second department</b>\n"
+        banks_text += "━━━━━━━━━━━━━━━━━━\n"
+        banks_text += (
+            f"💰 <b>Price: {price} Birr</b> — "
+            "This unlocks all exams and practice courses in your second department.\n\n"
+        )
+    else:
+        banks_text = "⭐️ <b>Upgrade to TeleExam AI PRO</b>\n"
+        banks_text += "━━━━━━━━━━━━━━━━━━\n"
+        banks_text += f"💰 <b>Price: {price} Birr</b> — unlocks all features:\n"
+        banks_text += "• Unlimited AI Tutor explanations and follow-ups\n"
+        banks_text += "• All past exams and practice courses\n"
+        banks_text += "• Personalized AI study plans\n\n"
     banks_text += "<b>💳 Payment Instructions:</b>\n"
-    banks_text += f"Transfer <b>{settings.PRO_PRICE_BIRR} Birr</b> to any bank below, then send a screenshot of the receipt.\n\n"
+    banks_text += f"Transfer <b>{price} Birr</b> to any bank below, then send a screenshot of the receipt.\n\n"
 
     for bank in banks:
         banks_text += f"🏦 <b>{esc(bank.get('bank_name'))}</b>\n"
@@ -77,8 +99,17 @@ async def buy_pro_callback(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if not callback.from_user:
         return
+    await state.update_data(payment_kind="pro")
     await _send_payment_info(callback.message, callback.from_user.id)
 
+
+@router.callback_query(F.data == "pay_dual")
+async def pay_dual_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    if not callback.from_user:
+        return
+    await state.update_data(payment_kind="dual_department")
+    await _send_payment_info(callback.message, callback.from_user.id, kind="dual_department")
 
 
 @router.message(F.text == "⭐️ Upgrade to PRO")
@@ -86,6 +117,7 @@ async def upgrade_to_pro_menu(message: Message, state: FSMContext) -> None:
     if not message.from_user:
         return
 
+    await state.update_data(payment_kind="pro")
     await _send_payment_info(message, message.from_user.id)
 
 
@@ -120,12 +152,15 @@ async def process_screenshot_upload(message: Message, state: FSMContext) -> None
 
         # Prepare form data
         form_data = aiohttp.FormData()
+        user_data = await state.get_data()
+        payment_kind = user_data.get("payment_kind") or "pro"
         form_data.add_field(
             name="file",
             value=file_bytes,
             filename=f"receipt_{message.from_user.id}.jpg",
             content_type="image/jpeg",
         )
+        form_data.add_field(name="kind", value=payment_kind)
 
         res = await api_client.post_multipart(
             path="/api/payments/submit",
@@ -135,10 +170,20 @@ async def process_screenshot_upload(message: Message, state: FSMContext) -> None
 
         if res:
             await state.set_state(None)
+            if payment_kind == "dual_department":
+                success_text = (
+                    "✅ <b>Payment Receipt Received!</b>\n\n"
+                    "Thank you! Your dual-department payment is now under admin review.\n"
+                    "Once approved, your second department will be fully unlocked."
+                )
+            else:
+                success_text = (
+                    "✅ <b>Payment Receipt Received!</b>\n\n"
+                    "Thank you! Your submission is now under admin review.\n"
+                    "Once approved, your account will automatically be upgraded to <b>PRO</b>!"
+                )
             await message.answer(
-                "✅ <b>Payment Receipt Received!</b>\n\n"
-                "Thank you! Your submission is now under admin review.\n"
-                "Once approved, your account will automatically be upgraded to <b>PRO</b>!",
+                success_text,
                 parse_mode="HTML",
                 reply_markup=main_menu_keyboard(),
             )

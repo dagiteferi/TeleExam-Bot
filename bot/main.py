@@ -17,6 +17,7 @@ from bot.routers.progress import router as progress_router
 from bot.routers.sessions import router as sessions_router
 from bot.routers.referral import router as referral_router
 from bot.routers.payment import router as payment_router
+from bot.routers.dual_degree import router as dual_degree_router
 from bot.keyboards.reply import main_menu_keyboard
 from bot.services.api_client import api_client, UserBannedError
 from bot.utils.text import esc
@@ -148,6 +149,7 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     dp.include_router(ai_tutor_router)
     dp.include_router(progress_router)
     dp.include_router(payment_router)
+    dp.include_router(dual_degree_router)
     dp.include_router(referral_router)
 
 
@@ -176,9 +178,23 @@ if __name__ == "__main__":
         print(f"{YELLOW}aiohttp:{RESET} {aiohttp.__version__}")
         print(f"{CYAN}================================================={RESET}\n")
 
+    async def start_notify_server(bot: Bot, dp: Dispatcher) -> None:
+        """Serves /internal/notify locally too, so the local backend relays admin
+        messages (with the refreshed menu) through this bot, exactly as in production."""
+        from aiohttp import web
+        from bot.notify import make_notify_handler
+
+        app = web.Application()
+        app.router.add_post("/internal/notify", make_notify_handler(bot, dp))
+        runner = web.AppRunner(app)
+        await runner.setup()
+        await web.TCPSite(runner, "127.0.0.1", settings.PORT).start()
+        print(f"Notify relay listening on http://127.0.0.1:{settings.PORT}/internal/notify")
+
     async def start_polling():
         print_startup_details()
         bot, dp = await get_bot_and_dispatcher()
+        await start_notify_server(bot, dp)
         print("Bot started in polling mode!")
         await dp.start_polling(bot)
 

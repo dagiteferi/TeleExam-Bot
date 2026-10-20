@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery, Message, User
 
 from bot.keyboards.inline import department_confirmation_keyboard, department_selection_keyboard
 from bot.keyboards.reply import main_menu_keyboard
+from bot.middlewares.auto_upsert import profile_from_response
 from bot.services.api_client import api_client
 from bot.states.session_states import Onboarding
 from bot.utils.text import esc
@@ -177,10 +178,31 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
             ref_code = payload.split("_", 1)[1]
             await state.update_data(temp_ref_code=ref_code)
 
-    # AutoUpsertMiddleware has already synced this user with the backend
-    # and stored their department (if any) in state, so no extra call here.
+    # AutoUpsertMiddleware normally has the user's department in state already.
     user_data = await state.get_data()
     department_id = user_data.get("department_id")
+
+    if not department_id:
+        # State can be empty after a restart or a slow backend. Never show the
+        # department list to an existing user: ask the backend before onboarding.
+        profile = await api_client.post(
+            path="/api/users/upsert",
+            telegram_id=message.from_user.id,
+            payload={
+                "telegram_id": message.from_user.id,
+                "first_name": message.from_user.first_name,
+                "last_name": message.from_user.last_name,
+                "telegram_username": message.from_user.username,
+            },
+            timeout=30,
+        )
+        if not profile:
+            await message.answer(
+                "⏳ We couldn't reach the server right now. Please send /start again in a moment."
+            )
+            return
+        await state.update_data(**profile_from_response(profile))
+        department_id = profile.get("department_id")
 
     if department_id:
         # Already has department, skip straight to menu
