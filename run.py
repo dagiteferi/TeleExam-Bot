@@ -8,7 +8,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 
 from bot.config import settings
 from bot.main import get_bot_and_dispatcher
-from bot.notify import make_notify_handler, run_announcement_sender
+from bot.notify import make_notify_handler, make_wake_handler, run_announcement_sender
 from bot.services.api_client import api_client
 
 # Configure logging
@@ -65,6 +65,7 @@ async def start_webhook_server() -> None:
 
     # Backend → bot relay for admin notifications (payment approved/rejected, etc.)
     app.router.add_post("/internal/notify", make_notify_handler(bot, dp))
+    app.router.add_post("/internal/announcements/wake", make_wake_handler())
 
     # Setup aiogram application (this registers the dispatcher's handlers with aiohttp)
     setup_application(app, dp, bot=bot)

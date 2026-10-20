@@ -182,10 +182,11 @@ if __name__ == "__main__":
         """Serves /internal/notify locally too, so the local backend relays admin
         messages (with the refreshed menu) through this bot, exactly as in production."""
         from aiohttp import web
-        from bot.notify import make_notify_handler
+        from bot.notify import make_notify_handler, make_wake_handler
 
         app = web.Application()
         app.router.add_post("/internal/notify", make_notify_handler(bot, dp))
+        app.router.add_post("/internal/announcements/wake", make_wake_handler())
         runner = web.AppRunner(app)
         await runner.setup()
         await web.TCPSite(runner, "127.0.0.1", settings.PORT).start()

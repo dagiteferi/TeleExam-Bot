@@ -82,12 +82,28 @@ def make_notify_handler(bot: Bot, dp: Dispatcher):
 
 # ── Announcements ────────────────────────────────────────────────────────────
 
-ANNOUNCEMENT_POLL_SECONDS = 20
+# Regular check; new announcements and users becoming idle also wake the sender at once.
+ANNOUNCEMENT_POLL_SECONDS = 10
 ANNOUNCEMENT_BATCH = 30
 # Telegram allows about 30 messages per second; stay well below it.
 SEND_INTERVAL_SECONDS = 0.05
 # Someone who left an exam half-done this long ago is not really busy any more.
 BUSY_TIMEOUT_SECONDS = 30 * 60
+
+
+_wake = asyncio.Event()
+# Users skipped because they were busy; the middleware wakes the sender when they are idle again.
+_waiting_users: set[int] = set()
+
+
+def wake_announcement_sender() -> None:
+    _wake.set()
+
+
+def wake_if_waiting(telegram_id: int) -> None:
+    """Called after each idle update: send this user's waiting announcements right away."""
+    if telegram_id in _waiting_users:
+        _wake.set()
 
 
 async def _is_busy_now(state: FSMContext) -> bool:
@@ -115,7 +131,9 @@ async def _deliver_batch(bot: Bot, dp: Dispatcher) -> int:
         if await _is_busy_now(state):
             # In an exam, AI chat, payment upload...: deliver once they are idle.
             deferred.append(delivery_id)
+            _waiting_users.add(telegram_id)
             continue
+        _waiting_users.discard(telegram_id)
 
         reply_markup = None
         if item.get("has_department"):
@@ -160,5 +178,24 @@ async def run_announcement_sender(bot: Bot, dp: Dispatcher) -> None:
         except Exception:
             logging.exception("Announcement sender error")
             sent = 0
-        # Keep going straight away while a large announcement is still being sent.
-        await asyncio.sleep(1 if sent >= ANNOUNCEMENT_BATCH // 2 else ANNOUNCEMENT_POLL_SECONDS)
+        # Keep going straight away while a large announcement is still being sent;
+        # otherwise wait for the next check or a wake-up (new announcement, idle user).
+        if sent >= ANNOUNCEMENT_BATCH // 2:
+            await asyncio.sleep(0.5)
+            continue
+        try:
+            await asyncio.wait_for(_wake.wait(), timeout=ANNOUNCEMENT_POLL_SECONDS)
+        except asyncio.TimeoutError:
+            pass
+        _wake.clear()
+
+
+def make_wake_handler():
+    """POST /internal/announcements/wake — the backend asks for an immediate send."""
+    async def wake_handler(request: web.Request) -> web.Response:
+        if not secrets.compare_digest(request.headers.get("X-Telegram-Secret", ""), settings.BACKEND_SECRET):
+            return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+        wake_announcement_sender()
+        return web.json_response({"ok": True})
+
+    return wake_handler

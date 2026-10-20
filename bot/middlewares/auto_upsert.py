@@ -129,6 +129,10 @@ class AutoUpsertMiddleware(BaseMiddleware):
                 await state.update_data(menu_version=0)
             return result
 
+        # A busy user with waiting announcements is idle again: send them now.
+        from bot.notify import wake_if_waiting
+        wake_if_waiting(user.id)
+
         # PRO or dual access was granted/revoked since the last update, or a deploy
         # changed the menu buttons: the keyboard Telegram shows is stale.
         change_text = _plan_change(before, after) if known_before else None
