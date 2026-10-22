@@ -159,7 +159,9 @@ def exam_selection_keyboard(exams: List[dict]) -> InlineKeyboardMarkup:
         year = exam["year"]
         semester = exam["semester"]
         is_locked = exam.get("is_locked", False)
-        req_invites = exam.get("required_invites", 1)
+        # None from the backend means PRO-only (invites can't unlock it)
+        req_invites = exam.get("required_invites")
+        req_invites = "pro" if req_invites is None else req_invites
         
         if is_locked:
             # Exam id keeps each button's data unique (handler reads only req_invites).
@@ -187,7 +189,9 @@ def course_selection_keyboard(courses: List[dict]) -> InlineKeyboardMarkup:
     for course in courses:
         course_id = course["id"]
         is_locked = course.get("is_locked", False)
-        req_invites = course.get("required_invites", 4)
+        # None from the backend means PRO-only (invites can't unlock it)
+        req_invites = course.get("required_invites")
+        req_invites = "pro" if req_invites is None else req_invites
         
         if is_locked:
             # Course id keeps each button's data unique (handler reads only req_invites).

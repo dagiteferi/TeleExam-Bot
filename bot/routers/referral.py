@@ -33,17 +33,41 @@ async def referral_dashboard(message: Message):
     
     bot_link = f"https://t.me/TeleExamAI_bot?start=ref_{invite_code}"
     
-    # Build referral journey text
+    # Build the unlock rules from the admin-configured invitation rules
+    app_settings = await api_client.get_app_settings()
+    rules = app_settings.get("invitation_rules") or {}
+    free_years = rules.get("free_years", 1)
+    invites_per_year = rules.get("invites_per_year", 1)
+    years_per_invite = rules.get("years_per_invite", 1)
+    free_courses_pct = round(float(rules.get("free_courses_ratio", 0.25)) * 100)
+    courses_per_invite = rules.get("courses_per_invite", 1)
+    ai_bonus = rules.get("ai_bonus_per_invite", 0)
+
+    if years_per_invite > 1:
+        year_rule = f"Each invite unlocks <b>{years_per_invite}</b> more exam years"
+    elif invites_per_year > 1:
+        year_rule = f"Every <b>{invites_per_year}</b> invites unlock 1 more exam year"
+    else:
+        year_rule = "Each invite unlocks <b>1</b> more exam year"
+
+    rule_lines = [
+        f"  • <b>Free:</b> oldest {free_years} exam year(s) and {free_courses_pct}% of courses",
+        f"  • {year_rule}",
+        f"  • Each invite unlocks <b>{courses_per_invite}</b> more course(s)",
+    ]
+    if ai_bonus > 0:
+        rule_lines.append(f"  • +{ai_bonus} free AI explanations per day for each invite")
+    rule_lines.append(
+        f"  • 💎 <b>Newest exam year &amp; full access:</b> PRO only — {settings.PRO_PRICE_BIRR} Birr"
+    )
+
     journey = (
         "<b>🤝 Referral Program</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "Invite your peers to study together and unlock advanced content.\n\n"
+        "Invite your peers to study together and unlock more content.\n\n"
         f"👤 <b>Total Referrals:</b> <code>{invite_count}</code>\n"
-        "<b>Content Unlock Sequence:</b>\n"
-        "  • <b>1 Referral:</b> Unlocks 2nd Year exams\n"
-        "  • <b>2 Referrals:</b> Unlocks 3rd Year exams\n"
-        "  • <b>3 Referrals:</b> Unlocks 4th Year exams\n"
-        "  • <b>4 Referrals:</b> Full Access to all content\n"
+        "<b>How invites unlock content:</b>\n"
+        + "\n".join(rule_lines) + "\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
         f"<b>📊 Your Invite Link:</b>\n"
         f"<code>{bot_link}</code>\n\n"

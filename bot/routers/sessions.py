@@ -294,6 +294,34 @@ def _study_department_id(user_data: Dict[str, Any]) -> Optional[str]:
     return user_data.get("department_id")
 
 
+def _locked_content_message(title: str, item: str, req_tag: str, invite_count: int, bot_link: str) -> tuple[str, bool]:
+    """Builds the locked-content text from the backend's required_invites. Returns (text, invites_can_unlock)."""
+    if not req_tag.isdigit():
+        # Invites can never unlock this item — PRO only
+        return (
+            f"💎  <b>{title} — PRO only</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"{item.capitalize()} can only be unlocked with PRO.\n"
+            "Invites unlock some content, but full access requires PRO.\n\n"
+            f"Upgrade to PRO for <b>{settings.PRO_PRICE_BIRR} Birr</b> "
+            "to unlock all exams, courses and features right away."
+        ), False
+
+    needed = max(1, int(req_tag) - invite_count)
+    return (
+        f"🔒  <b>{title} is Locked</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Invite <b>{needed} more friend{'s' if needed > 1 else ''}</b> to unlock {item}.\n"
+        f"📊  Your current invites: <b>{invite_count}</b>\n\n"
+        "👇  <b>Share your invite link with friends to unlock this content:</b>\n"
+        f"<code>{bot_link}</code>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>Every friend who joins via your link counts as one invite!</i>\n\n"
+        f"💎 <b>Or pay {settings.PRO_PRICE_BIRR} Birr</b> for PRO "
+        "to unlock all exams, courses and features right away."
+    ), True
+
+
 @router.callback_query(F.data.startswith("locked_course_"))
 async def process_locked_course_selection(callback: CallbackQuery) -> None:
     """
@@ -306,7 +334,7 @@ async def process_locked_course_selection(callback: CallbackQuery) -> None:
     await callback.answer()  # Dismiss the loading spinner immediately
 
     parts = callback.data.split("_")
-    req_invites = parts[2] if len(parts) >= 3 else "a few"
+    req_invites = parts[2] if len(parts) >= 3 else "pro"
 
     # Fetch user's referral info to get their personal invite link
     user_data = await api_client.post(
@@ -320,21 +348,10 @@ async def process_locked_course_selection(callback: CallbackQuery) -> None:
     bot_link = f"https://t.me/TeleExamAI_bot?start=ref_{invite_code}" if invite_code else "https://t.me/TeleExamAI_bot"
     share_url = f"https://t.me/share/url?url={bot_link}&text=Study%20better%20with%20TeleExam%20AI!%20Access%20past%20exams%20now."
 
-    text = (
-        "🔒  <b>This Course is Locked</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"You need <b>{req_invites} total invite(s)</b> to unlock all practice courses.\n"
-        f"📊  Your current invites: <b>{invite_count}</b>\n\n"
-        "👇  <b>Share your invite link with friends to unlock this content:</b>\n"
-        f"<code>{bot_link}</code>\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>Every friend who joins via your link counts as one invite!</i>\n\n"
-        f"💎 <b>Don't want to wait?</b> Upgrade to PRO for <b>{settings.PRO_PRICE_BIRR} Birr</b> "
-        "to unlock all exams, courses and features right away."
-    )
+    text, can_invite = _locked_content_message("This Course", "this course", req_invites, invite_count, bot_link)
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📢 Share Invite Link", url=share_url)],
+    rows = [[InlineKeyboardButton(text="📢 Share Invite Link", url=share_url)]] if can_invite else []
+    keyboard = InlineKeyboardMarkup(inline_keyboard=rows + [
         [InlineKeyboardButton(text=f"💎 Unlock everything with PRO — {settings.PRO_PRICE_BIRR} Birr", callback_data="buy_pro")],
         [InlineKeyboardButton(text="⬅️ Back to Courses", callback_data="back_to_courses")],
     ])
@@ -405,7 +422,7 @@ async def process_locked_exam_selection(callback: CallbackQuery) -> None:
     await callback.answer()  # Dismiss the loading spinner immediately
 
     parts = callback.data.split("_")
-    req_invites = parts[2] if len(parts) >= 3 else "a few"
+    req_invites = parts[2] if len(parts) >= 3 else "pro"
 
     # Fetch user's referral info to get their personal invite link
     user_data = await api_client.post(
@@ -419,21 +436,10 @@ async def process_locked_exam_selection(callback: CallbackQuery) -> None:
     bot_link = f"https://t.me/TeleExamAI_bot?start=ref_{invite_code}" if invite_code else "https://t.me/TeleExamAI_bot"
     share_url = f"https://t.me/share/url?url={bot_link}&text=Study%20better%20with%20TeleExam%20AI!%20Access%20past%20exams%20now."
 
-    text = (
-        "🔒  <b>This Exam Year is Locked</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"You need <b>{req_invites} invite(s)</b> to unlock this exam year.\n"
-        f"📊  Your current invites: <b>{invite_count}</b>\n\n"
-        "👇  <b>Share your invite link with friends to unlock this content:</b>\n"
-        f"<code>{bot_link}</code>\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>Every friend who joins via your link counts as one invite!</i>\n\n"
-        f"💎 <b>Don't want to wait?</b> Upgrade to PRO for <b>{settings.PRO_PRICE_BIRR} Birr</b> "
-        "to unlock all exams, courses and features right away."
-    )
+    text, can_invite = _locked_content_message("This Exam Year", "this exam year", req_invites, invite_count, bot_link)
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📢 Share Invite Link", url=share_url)],
+    rows = [[InlineKeyboardButton(text="📢 Share Invite Link", url=share_url)]] if can_invite else []
+    keyboard = InlineKeyboardMarkup(inline_keyboard=rows + [
         [InlineKeyboardButton(text=f"💎 Unlock everything with PRO — {settings.PRO_PRICE_BIRR} Birr", callback_data="buy_pro")],
         [InlineKeyboardButton(text="⬅️ Back to Exams", callback_data="back_to_exams")],
     ])
