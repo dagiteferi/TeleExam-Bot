@@ -294,31 +294,54 @@ def _study_department_id(user_data: Dict[str, Any]) -> Optional[str]:
     return user_data.get("department_id")
 
 
-def _locked_content_message(title: str, item: str, req_tag: str, invite_count: int, bot_link: str) -> tuple[str, bool]:
-    """Builds the locked-content text from the backend's required_invites. Returns (text, invites_can_unlock)."""
+async def _locked_content_message(kind: str, req_tag: str, invite_count: int, bot_link: str) -> tuple[str, bool]:
+    """
+    Builds the locked-content text for an exam year (kind="year") or course (kind="course")
+    from the backend's required_invites and the admin-configured invitation rules.
+    Returns (text, invites_can_unlock).
+    """
+    rules = (await api_client.get_app_settings()).get("invitation_rules") or {}
+    max_years = rules.get("max_invite_years", 1)
+    years_word = f"{max_years} extra exam year{'s' if max_years != 1 else ''}"
+    item = "this exam year" if kind == "year" else "this course"
+    title = "This Exam Year" if kind == "year" else "This Course"
+    invite_limit = (
+        f"Invites can unlock only <b>{years_word}</b>. All other years need PRO."
+        if kind == "year"
+        else "Invites can unlock some courses, but never all of them. The rest need PRO."
+    )
+    pro_offer = (
+        f"💎 <b>Pay {settings.PRO_PRICE_BIRR} Birr for PRO — no invites needed</b>\n"
+        "  ✅ All exam years\n"
+        "  ✅ All courses\n"
+        "  ✅ All features"
+    )
+
     if not req_tag.isdigit():
         # Invites can never unlock this item — PRO only
         return (
-            f"💎  <b>{title} — PRO only</b>\n"
+            f"💎  <b>{title} needs PRO</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"{item.capitalize()} can only be unlocked with PRO.\n"
-            "Invites unlock some content, but full access requires PRO.\n\n"
-            f"Upgrade to PRO for <b>{settings.PRO_PRICE_BIRR} Birr</b> "
-            "to unlock all exams, courses and features right away."
+            f"{invite_limit}\n"
+            f"So {item} can only be opened by paying.\n\n"
+            f"{pro_offer}"
         ), False
 
-    needed = max(1, int(req_tag) - invite_count)
+    required = int(req_tag)
+    needed = max(1, required - invite_count)
     return (
         f"🔒  <b>{title} is Locked</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"Invite <b>{needed} more friend{'s' if needed > 1 else ''}</b> to unlock {item}.\n"
-        f"📊  Your current invites: <b>{invite_count}</b>\n\n"
-        "👇  <b>Share your invite link with friends to unlock this content:</b>\n"
-        f"<code>{bot_link}</code>\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>Every friend who joins via your link counts as one invite!</i>\n\n"
-        f"💎 <b>Or pay {settings.PRO_PRICE_BIRR} Birr</b> for PRO "
-        "to unlock all exams, courses and features right away."
+        "You have two ways to open it:\n\n"
+        "<b>1️⃣ Invite friends (free)</b>\n"
+        f"  • Invite <b>{needed} more friend{'s' if needed > 1 else ''}</b> to unlock {item}.\n"
+        f"  • 📊 Your invites: <b>{invite_count}</b> of <b>{required}</b> needed\n"
+        f"  • ⚠️ {invite_limit}\n"
+        "  • A friend counts only after they start the bot <b>and choose their department</b>.\n\n"
+        "  👇 Your invite link:\n"
+        f"  <code>{bot_link}</code>\n\n"
+        "<b>2️⃣ Or skip the invites</b>\n"
+        f"{pro_offer}"
     ), True
 
 
@@ -348,7 +371,7 @@ async def process_locked_course_selection(callback: CallbackQuery) -> None:
     bot_link = f"https://t.me/TeleExamAI_bot?start=ref_{invite_code}" if invite_code else "https://t.me/TeleExamAI_bot"
     share_url = f"https://t.me/share/url?url={bot_link}&text=Study%20better%20with%20TeleExam%20AI!%20Access%20past%20exams%20now."
 
-    text, can_invite = _locked_content_message("This Course", "this course", req_invites, invite_count, bot_link)
+    text, can_invite = await _locked_content_message("course", req_invites, invite_count, bot_link)
 
     rows = [[InlineKeyboardButton(text="📢 Share Invite Link", url=share_url)]] if can_invite else []
     keyboard = InlineKeyboardMarkup(inline_keyboard=rows + [
@@ -436,7 +459,7 @@ async def process_locked_exam_selection(callback: CallbackQuery) -> None:
     bot_link = f"https://t.me/TeleExamAI_bot?start=ref_{invite_code}" if invite_code else "https://t.me/TeleExamAI_bot"
     share_url = f"https://t.me/share/url?url={bot_link}&text=Study%20better%20with%20TeleExam%20AI!%20Access%20past%20exams%20now."
 
-    text, can_invite = _locked_content_message("This Exam Year", "this exam year", req_invites, invite_count, bot_link)
+    text, can_invite = await _locked_content_message("year", req_invites, invite_count, bot_link)
 
     rows = [[InlineKeyboardButton(text="📢 Share Invite Link", url=share_url)]] if can_invite else []
     keyboard = InlineKeyboardMarkup(inline_keyboard=rows + [

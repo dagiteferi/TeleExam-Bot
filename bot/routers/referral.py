@@ -39,6 +39,7 @@ async def referral_dashboard(message: Message):
     free_years = rules.get("free_years", 1)
     invites_per_year = rules.get("invites_per_year", 1)
     years_per_invite = rules.get("years_per_invite", 1)
+    max_invite_years = rules.get("max_invite_years", 1)
     free_courses_pct = round(float(rules.get("free_courses_ratio", 0.25)) * 100)
     courses_per_invite = rules.get("courses_per_invite", 1)
     ai_bonus = rules.get("ai_bonus_per_invite", 0)
@@ -52,7 +53,7 @@ async def referral_dashboard(message: Message):
 
     rule_lines = [
         f"  • <b>Free:</b> oldest {free_years} exam year(s) and {free_courses_pct}% of courses",
-        f"  • {year_rule}",
+        f"  • {year_rule} (up to <b>{max_invite_years}</b> extra year(s) by invites)",
         f"  • Each invite unlocks <b>{courses_per_invite}</b> more course(s)",
     ]
     if ai_bonus > 0:
@@ -67,7 +68,8 @@ async def referral_dashboard(message: Message):
         "Invite your peers to study together and unlock more content.\n\n"
         f"👤 <b>Total Referrals:</b> <code>{invite_count}</code>\n"
         "<b>How invites unlock content:</b>\n"
-        + "\n".join(rule_lines) + "\n"
+        + "\n".join(rule_lines) + "\n\n"
+        "<i>A friend counts only after they start the bot and choose their department.</i>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
         f"<b>📊 Your Invite Link:</b>\n"
         f"<code>{bot_link}</code>\n\n"
@@ -80,9 +82,21 @@ async def referral_dashboard(message: Message):
         for i, user in enumerate(invited_users[:10], 1):  # Show top 10
             name = user.get("full_name") or user.get("first_name") or "User"
             joined = user.get("created_at", "")[:10] if user.get("created_at") else "N/A"
-            journey += f"  {i}. <b>{esc(name)}</b> - {esc(joined)}\n"
+            # Older backends don't send department_chosen; treat that as counted
+            if user.get("department_chosen", True):
+                status = "✅ counted"
+            else:
+                status = "⏳ not counted yet: hasn't chosen a department"
+            journey += f"  {i}. <b>{esc(name)}</b> - {esc(joined)} · {status}\n"
         if len(invited_users) > 10:
             journey += f"  ... and {len(invited_users) - 10} more\n"
+        pending = sum(1 for u in invited_users if not u.get("department_chosen", True))
+        if pending:
+            journey += (
+                f"\n⚠️ <b>{pending}</b> friend{'s' if pending > 1 else ''} joined but "
+                f"{'have' if pending > 1 else 'has'} not chosen a department yet. "
+                "Ask them to open the bot and pick their department so the invite counts.\n"
+            )
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📤 Share Link", url=f"https://t.me/share/url?url={bot_link}&text=Study%20better%20with%20TeleExam%20AI!%20Unlocking%20years%20of%20past%20exams%20now.")]
