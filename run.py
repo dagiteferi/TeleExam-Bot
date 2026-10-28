@@ -2,6 +2,7 @@ import asyncio
 import logging
 import argparse
 
+import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
@@ -27,6 +28,29 @@ async def on_startup_webhook(dispatcher: Dispatcher, bot: Bot) -> None:
     logging.info("Webhook set successfully.")
 
 
+KEEP_AWAKE_INTERVAL_SECONDS = 10 * 60  # Render's free tier sleeps after 15 idle minutes
+
+
+async def keep_awake() -> None:
+    """
+    Pings this bot's own public /health URL so Render's free tier never sees 15 idle
+    minutes and puts it to sleep. It must go through the public URL: Render only counts
+    traffic that comes in from outside, so calling localhost would not help.
+    """
+    if not settings.BOT_PUBLIC_URL:
+        return
+    url = f"{str(settings.BOT_PUBLIC_URL).rstrip('/')}/health"
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+        while True:
+            await asyncio.sleep(KEEP_AWAKE_INTERVAL_SECONDS)
+            try:
+                async with session.get(url) as response:
+                    if response.status != 200:
+                        logging.warning("Keep-awake ping to %s returned %s", url, response.status)
+            except Exception as e:
+                logging.warning("Keep-awake ping to %s failed: %s", url, e)
+
+
 async def on_shutdown_webhook(dispatcher: Dispatcher, bot: Bot) -> None:
     """
     Closes the aiohttp.ClientSession and logs bot shutdown on exit.
@@ -48,6 +72,7 @@ async def start_webhook_server() -> None:
     dp.startup.register(on_startup_webhook)
     # Deliver admin announcements in the background (kept referenced so it isn't garbage-collected)
     announcement_task = asyncio.create_task(run_announcement_sender(bot, dp))
+    keep_awake_task = asyncio.create_task(keep_awake())  # noqa: F841 (keep a reference)
     dp.shutdown.register(on_shutdown_webhook)
 
     # Create aiohttp web application
