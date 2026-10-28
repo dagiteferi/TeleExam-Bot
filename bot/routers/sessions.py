@@ -136,6 +136,8 @@ async def send_question(
 
     has_next = (question.index + 1 < question.total)
 
+    import time
+    # One write instead of two: question_sent_at is the send timestamp (for bot speed detection)
     await state.update_data(
         question_id=question.question_id,
         qtoken=question.qtoken,
@@ -143,10 +145,11 @@ async def send_question(
         is_practice=(mode == "practice"),
         question_options=question.options,
         is_bookmarked=question.is_bookmarked,
+        question_sent_at=time.time(),
     )
     # Set state to waiting_for_answer so the user can actually answer the question
     await state.set_state(ExamSession.waiting_for_answer)
-    
+
     keyboard = question_choices_keyboard(
         question.question_id,
         question.options,
@@ -155,13 +158,9 @@ async def send_question(
         is_practice_mode=(mode == "practice"),
     )
 
-    import time
     question_text = _format_question_message(question, mode)
     # Embed invisible watermark with user's telegram_id for scraper tracing
     watermarked_text = embed_watermark(question_text, telegram_id)
-
-    # Record the timestamp when question was sent (for bot speed detection)
-    await state.update_data(question_sent_at=time.time())
 
     await message.answer(
         watermarked_text,

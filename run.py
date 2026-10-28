@@ -63,6 +63,9 @@ async def start_webhook_server() -> None:
     # Register webhook handler on specified path
     webhook_requests_handler.register(app, path=settings.WEBHOOK_PATH)
 
+    # Uptime pingers hit this so Render's free tier doesn't put the bot to sleep
+    app.router.add_get("/health", lambda request: web.json_response({"status": "ok"}))
+
     # Backend → bot relay for admin notifications (payment approved/rejected, etc.)
     app.router.add_post("/internal/notify", make_notify_handler(bot, dp))
     app.router.add_post("/internal/announcements/wake", make_wake_handler())

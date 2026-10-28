@@ -1,8 +1,9 @@
-from typing import Any, Awaitable, Callable, Dict
+from typing import Any, Awaitable, Callable, Dict, Optional
+import asyncio
 import time
 
 from aiogram import BaseMiddleware
-from aiogram.types import CallbackQuery, TelegramObject
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, TelegramObject
 
 # Buttons whose handlers don't edit the tapped message, so they get no loading state.
 NO_LOADING_PREFIXES = ("locked_ex_", "locked_course_", "buy_pro", "upload_payment_screenshot")
@@ -44,9 +45,21 @@ class ThrottlingMiddleware(BaseMiddleware):
         if len(self.last_clicks) > 1000:
             self.last_clicks = {k: v for k, v in self.last_clicks.items() if current_time - v < 10}
 
-        # Show initial feedback ("Processing...") and change the button to loading
+        # Show initial feedback ("Processing...") and change the button to loading.
+        # Both are Telegram API calls that don't depend on each other, so they run
+        # together instead of one after the other (saves a round trip on every tap).
+        feedback = [self._answer(event)]
+        loading_markup = self._loading_markup(event)
+        if loading_markup is not None:
+            feedback.append(self._show_loading(event, loading_markup))
+        await asyncio.gather(*feedback)
+
+        return await handler(event, data)
+
+    @staticmethod
+    def _loading_markup(event: CallbackQuery) -> Optional[InlineKeyboardMarkup]:
+        """The tapped message's keyboard with the tapped button turned into a loading label."""
         try:
-            # 1. Update the button text to a loading emoji in the inline keyboard.
             # Skipped for locked buttons (their handler only sends an info message,
             # so the loading text would never be replaced) and when several buttons
             # share this callback data (we can't tell which one was tapped).
@@ -76,15 +89,24 @@ class ThrottlingMiddleware(BaseMiddleware):
                     new_keyboard.append(new_row)
                 
                 if found:
-                    from aiogram.types import InlineKeyboardMarkup
-                    await event.message.edit_reply_markup(
-                        reply_markup=InlineKeyboardMarkup(inline_keyboard=new_keyboard)
-                    )
-            
-            # 2. Answer the callback as fallback for Telegram UI status bar
-            await event.answer("Processing...")
-        except:
+                    return InlineKeyboardMarkup(inline_keyboard=new_keyboard)
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    async def _show_loading(event: CallbackQuery, markup: InlineKeyboardMarkup) -> None:
+        try:
+            await event.message.edit_reply_markup(reply_markup=markup)
+        except Exception:
             # Silently ignore errors in UI feedback
             pass
 
-        return await handler(event, data)
+    @staticmethod
+    async def _answer(event: CallbackQuery) -> None:
+        # Answer the callback as fallback for Telegram UI status bar
+        try:
+            await event.answer("Processing...")
+        except Exception:
+            # Silently ignore errors in UI feedback
+            pass
