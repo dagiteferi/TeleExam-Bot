@@ -1,4 +1,4 @@
-aiogram==3.*
+aiogram>=3.14,<4  # 3.14+ for CopyTextButton
 aiohttp==3.*
 pydantic==2.*
 pydantic-settings==2.*

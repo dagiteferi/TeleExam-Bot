@@ -3,7 +3,7 @@ from io import BytesIO
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, CopyTextButton
 import aiohttp
 
 from bot.config import settings
@@ -83,11 +83,21 @@ async def _send_payment_info(target, telegram_id: int, kind: str = "pro") -> Non
         banks_text += f"🔢 <b>Account Number:</b> <code>{esc(bank.get('account_number'))}</code>\n\n"
 
     banks_text += "━━━━━━━━━━━━━━━━━━\n"
-    banks_text += "Click the button below when you are ready to upload your screenshot."
+    banks_text += "Tap 📋 to copy an account number, then upload your screenshot below."
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📸 Upload Receipt Screenshot", callback_data="upload_payment_screenshot")],
-    ])
+    # One copy button per bank; Telegram copies the number on the user's device, no callback.
+    buttons = [
+        [InlineKeyboardButton(
+            text=f"📋 Copy {bank.get('bank_name') or 'account'} number",
+            copy_text=CopyTextButton(text=str(bank["account_number"])),
+        )]
+        for bank in banks
+        if bank.get("account_number")
+    ]
+    buttons.append(
+        [InlineKeyboardButton(text="📸 Upload Receipt Screenshot", callback_data="upload_payment_screenshot")]
+    )
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     await target.answer(banks_text, parse_mode="HTML", reply_markup=keyboard)
 
 
