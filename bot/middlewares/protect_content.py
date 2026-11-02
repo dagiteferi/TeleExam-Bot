@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict
 
 from aiogram import Bot
@@ -19,6 +20,8 @@ async def save_recording_flag(storage: BaseStorage, bot_id: int, telegram_id: in
     """Stores can_record from a backend profile (upsert or /me response)."""
     if "can_record" in profile:
         await storage.set_data(_recording_key(bot_id, telegram_id), {"can_record": bool(profile["can_record"])})
+        if profile["can_record"]:
+            logging.info("Recording flag saved for %s", telegram_id)
 
 
 class ProtectContentMiddleware(BaseRequestMiddleware):
@@ -41,4 +44,5 @@ class ProtectContentMiddleware(BaseRequestMiddleware):
         if hasattr(method, "protect_content") and isinstance(chat_id, int) and chat_id > 0:
             if (await self._storage.get_data(_recording_key(bot.id, chat_id))).get("can_record"):
                 method.protect_content = False
+                logging.info("Recording allowed: sending %s to %s unprotected", type(method).__name__, chat_id)
         return await make_request(bot, method)
