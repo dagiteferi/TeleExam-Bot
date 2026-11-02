@@ -13,6 +13,7 @@ from aiogram.types import ReplyKeyboardRemove
 from bot.config import settings
 from bot.keyboards.reply import MENU_VERSION, MenuState, main_menu_keyboard
 from bot.middlewares.auto_upsert import profile_from_response
+from bot.middlewares.protect_content import save_recording_flag
 from bot.services.api_client import api_client
 from bot.states.session_states import AIInteraction, is_busy
 from bot.utils.text import esc
@@ -37,6 +38,7 @@ async def _refreshed_menu(bot: Bot, dp: Dispatcher, telegram_id: int):
     if not profile:
         return None
     state = user_state(bot, dp, telegram_id)
+    await save_recording_flag(dp.storage, bot.id, telegram_id, profile)
     if not profile.get("department_id"):
         # Admin reset: forget everything (selected course, exam state...) so
         # /start shows the department choice again.

@@ -7,6 +7,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message, TelegramObject, User
 
 from bot.keyboards.reply import MENU_VERSION, MenuState, current_menu_state, main_menu_keyboard, menu_attached
+from bot.middlewares.protect_content import save_recording_flag
 from bot.states.session_states import is_busy
 from bot.services.api_client import api_client
 
@@ -110,6 +111,8 @@ class AutoUpsertMiddleware(BaseMiddleware):
 
         if updates and state:
             await state.update_data(**updates)
+            if data.get("fsm_storage") and data.get("bot"):
+                await save_recording_flag(data["fsm_storage"], data["bot"].id, user.id, updates)
 
         known_before = "is_pro" in user_state
         before = MenuState.from_profile(user_state)
