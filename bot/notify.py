@@ -8,6 +8,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramNotFound, TelegramRetryAfter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
+from aiogram.types import ReplyKeyboardRemove
 
 from bot.config import settings
 from bot.keyboards.reply import MENU_VERSION, MenuState, main_menu_keyboard
@@ -36,6 +37,11 @@ async def _refreshed_menu(bot: Bot, dp: Dispatcher, telegram_id: int):
     if not profile:
         return None
     state = user_state(bot, dp, telegram_id)
+    if not profile.get("department_id"):
+        # Admin reset: forget everything (selected course, exam state...) so
+        # /start shows the department choice again.
+        await state.clear()
+        return ReplyKeyboardRemove()
     await state.update_data(**profile_from_response(profile))
     if await state.get_state() == AIInteraction.chatting.state:
         # Refresh the menu once they leave the chat.

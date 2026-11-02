@@ -10,6 +10,7 @@ from aiogram.types import ErrorEvent, ReplyKeyboardRemove
 
 from bot.config import settings
 from bot.middlewares.auto_upsert import AutoUpsertMiddleware
+from bot.middlewares.protect_content import ProtectContentMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.routers.ai_tutor import router as ai_tutor_router, chat_exit_router
 from bot.routers.onboarding import router as onboarding_router
@@ -133,6 +134,7 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
         logging.info("Redis FSM storage connected.")
 
     dp = Dispatcher(storage=storage)
+    bot.session.middleware(ProtectContentMiddleware(storage))
 
    
     # One shared instance so profiles refreshed in the background on a message

@@ -28,6 +28,7 @@ def profile_from_response(user_response: Dict[str, Any]) -> Dict[str, Any]:
         "secondary_department_name": user_response.get("secondary_department_name"),
         "secondary_department_unlocked": user_response.get("secondary_department_unlocked", False),
         "has_dual_access": user_response.get("has_dual_access", False),
+        "can_record": user_response.get("can_record", False),
         "active_department_id": user_response.get("active_department_id") or user_response.get("department_id"),
         "active_department_name": user_response.get("active_department_name") or user_response.get("department_name"),
     }
