@@ -30,7 +30,7 @@ async def _send_payment_info(target, telegram_id: int, kind: str = "pro") -> Non
     if not is_dual:
         # An old menu or inline button can still offer PRO to someone who already has it.
         profile = await api_client.get(path="/api/users/me", telegram_id=telegram_id)
-        if profile and profile.get("is_pro"):
+        if profile and (profile.get("is_pro") or profile.get("is_full_access")):
             await target.answer(
                 "✅ You are already <b>PRO</b> — all features are unlocked.",
                 parse_mode="HTML",

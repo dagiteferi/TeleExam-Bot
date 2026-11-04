@@ -15,7 +15,8 @@ class MenuState:
     @classmethod
     def from_profile(cls, profile: dict) -> "MenuState":
         return cls(
-            is_pro=bool(profile.get("is_pro")),
+            # Admin-granted full access unlocks everything PRO does
+            is_pro=bool(profile.get("is_pro") or profile.get("is_full_access")),
             has_dual_access=bool(profile.get("has_dual_access")),
         )
 

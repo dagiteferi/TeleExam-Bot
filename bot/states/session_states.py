@@ -37,6 +37,12 @@ class AIInteraction(StatesGroup):
     chatting = State()  # User is actively chatting with the AI tutor
 
 
+class ResultsHistory(StatesGroup):
+    """Waiting for the user to type a custom date range for the results history."""
+
+    entering_dates = State()
+
+
 class Payment(StatesGroup):
     """
     States for handling payment receipt upload.

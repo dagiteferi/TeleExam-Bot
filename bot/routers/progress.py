@@ -1,12 +1,16 @@
+import re
 from typing import Optional
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 
 from aiogram import F, Router
+from aiogram.dispatcher.event.bases import SkipHandler
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from pydantic import BaseModel
 
-from bot.keyboards.reply import main_menu_keyboard
+from bot.keyboards.reply import MAIN_MENU_TEXTS, main_menu_keyboard
+from bot.states.session_states import ResultsHistory
 from bot.services.api_client import api_client
 from bot.utils.text import answer_long, esc
 
@@ -67,6 +71,47 @@ class ProgressResponse(BaseModel):
     top_exam_scores: list[TopExamScore] = []
     active_session_info: Optional[ActiveSessionInfo] = None
     recent_sessions: list[RecentSession] = []
+
+
+class HistoryItem(BaseModel):
+    session_id: str
+    mode: str
+    title: str
+    score_percent: float
+    correct_count: int
+    wrong_count: int
+    question_count: int
+    duration_seconds: int = 0
+    submitted_at: datetime
+
+
+class HistoryResponse(BaseModel):
+    department_name: Optional[str] = None
+    mode: str
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
+    page: int
+    page_size: int
+    total: int
+    has_next: bool
+    items: list[HistoryItem]
+
+
+# Students are in Ethiopia (UTC+3, no daylight saving); show their local time.
+LOCAL_TZ = timezone(timedelta(hours=3))
+HISTORY_PAGE_SIZE = 10
+HISTORY_MODES = {"all": "All", "exam": "📝 Exams", "practice": "🎯 Practice"}
+# Quick day filters. A custom range is encoded as "YYYYMMDD-YYYYMMDD".
+RANGE_PRESETS = {
+    "today": "Today",
+    "7d": "Last 7 days",
+    "month": "This month",
+    "30d": "Last 30 days",
+    "all": "All time",
+}
+_CUSTOM_RANGE_RE = re.compile(r"(\d{8})-(\d{8})")
+# Accepts DD/MM/YYYY (also with - or .) and YYYY-MM-DD
+_TYPED_DATE_RE = re.compile(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})|(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})")
 
 
 # ─── Formatting helpers ───────────────────────────────────────────────────────
@@ -174,6 +219,194 @@ def _format_progress(data: ProgressResponse) -> str:
     return "\n".join(lines)
 
 
+def _format_duration(seconds: int) -> str:
+    if seconds <= 0:
+        return ""
+    minutes = seconds // 60
+    if minutes < 1:
+        return f"{seconds}s"
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60}h {minutes % 60:02d}m"
+
+
+def _local_today() -> date:
+    return datetime.now(LOCAL_TZ).date()
+
+
+def _resolve_range(token: str) -> tuple[Optional[date], Optional[date]]:
+    """Turns a range token (preset or custom) into (first day, last day); (None, None) = all time."""
+    today = _local_today()
+    if token == "today":
+        return today, today
+    if token == "7d":
+        return today - timedelta(days=6), today
+    if token == "30d":
+        return today - timedelta(days=29), today
+    if token == "month":
+        return today.replace(day=1), today
+    match = _CUSTOM_RANGE_RE.fullmatch(token)
+    if match:
+        try:
+            return (
+                datetime.strptime(match.group(1), "%Y%m%d").date(),
+                datetime.strptime(match.group(2), "%Y%m%d").date(),
+            )
+        except ValueError:
+            pass
+    return None, None
+
+
+def _custom_token(first: date, last: date) -> str:
+    return f"{first:%Y%m%d}-{last:%Y%m%d}"
+
+
+def _format_period(first: Optional[date], last: Optional[date]) -> str:
+    if not first or not last:
+        return ""
+    if first == last:
+        return first.strftime("%b %d, %Y")
+    if first.year == last.year:
+        return f"{first:%b %d} – {last:%b %d, %Y}"
+    return f"{first:%b %d, %Y} – {last:%b %d, %Y}"
+
+
+def _parse_typed_range(text: str) -> tuple[date, date]:
+    """
+    Reads one or two dates typed by the user, e.g. "01/10/2026 - 04/11/2026" or "04/11/2026".
+    Raises ValueError with a user-friendly message when the input is not usable.
+    """
+    days = []
+    for m in _TYPED_DATE_RE.finditer(text):
+        if m.group(1):
+            year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        else:
+            day, month, year = int(m.group(4)), int(m.group(5)), int(m.group(6))
+        try:
+            days.append(date(year, month, day))
+        except ValueError:
+            raise ValueError(f"{m.group(0)} is not a real date.")
+
+    if not days or len(days) > 2:
+        raise ValueError("Please send one date, or two dates for a range.")
+    first, last = min(days), max(days)
+    today = _local_today()
+    if first > today:
+        raise ValueError("That date is in the future.")
+    return first, min(last, today)
+
+
+def _format_history(data: HistoryResponse, range_token: str = "all") -> str:
+    """Results history grouped by month, newest first."""
+    divider = "━" * 30
+    lines = [f"<b>📜 Results History — {HISTORY_MODES.get(data.mode, 'All')}</b>"]
+    if data.department_name:
+        lines.append(f"📚 Department: <b>{esc(data.department_name.title())}</b>")
+    period = _format_period(data.date_from, data.date_to)
+    preset = RANGE_PRESETS.get(range_token)
+    if period:
+        label = f"{preset} ({period})" if preset else period
+        lines.append(f"📅 Period: <b>{label}</b>")
+    else:
+        lines.append("📅 Period: <b>All time</b>")
+    lines.append(divider)
+
+    if not data.items:
+        lines.append(
+            "No results in this period. Try a wider range."
+            if period else "No finished sessions here yet."
+        )
+        return "\n".join(lines)
+
+    current_month = None
+    for item in data.items:
+        local = item.submitted_at.astimezone(LOCAL_TZ)
+        month = local.strftime("%B %Y")
+        if month != current_month:
+            current_month = month
+            lines += ["", f"🗓 <b>{month}</b>"]
+
+        icon = "📝" if item.mode == "exam" else "🎯"
+        details = [local.strftime("%b %d, %H:%M")]
+        duration = _format_duration(item.duration_seconds)
+        if duration:
+            details.append(f"⏱ {duration}")
+        skipped = item.question_count - item.correct_count - item.wrong_count
+        if item.mode != "practice" and skipped > 0:
+            details.append(f"{skipped} skipped")
+
+        lines.append(f"{icon} <b>{esc(item.title)}</b>")
+        lines.append(
+            f"    Score: <b>{item.score_percent:.1f}%</b> "
+            f"({item.correct_count}/{item.question_count})"
+        )
+        lines.append(f"    <i>{' · '.join(details)}</i>")
+
+    pages = max(1, -(-data.total // data.page_size))
+    lines += ["", divider, f"Page <b>{data.page + 1}</b> of <b>{pages}</b> · {data.total} results in total"]
+    return "\n".join(lines)
+
+
+def _history_keyboard(data: HistoryResponse, range_token: str) -> InlineKeyboardMarkup:
+    """
+    Buttons: type filter, day filter, custom dates and paging.
+    Callback format: hist:<mode>:<page>:<range>, where range is a preset or YYYYMMDD-YYYYMMDD.
+    """
+    def mark(selected: bool, text: str) -> str:
+        return f"✅ {text}" if selected else text
+
+    def range_btn(token: str, text: str) -> InlineKeyboardButton:
+        return InlineKeyboardButton(
+            text=mark(token == range_token, text),
+            callback_data=f"hist:{data.mode}:0:{token}",
+        )
+
+    is_custom = range_token not in RANGE_PRESETS
+    rows = [
+        [
+            InlineKeyboardButton(text=mark(mode == data.mode, label), callback_data=f"hist:{mode}:0:{range_token}")
+            for mode, label in HISTORY_MODES.items()
+        ],
+        [range_btn("today", "Today"), range_btn("7d", "7 days"), range_btn("month", "This month")],
+        [
+            range_btn("30d", "30 days"),
+            range_btn("all", "All time"),
+            InlineKeyboardButton(text=mark(is_custom, "📆 Custom"), callback_data=f"histc:{data.mode}"),
+        ],
+    ]
+
+    nav_row = []
+    if data.page > 0:
+        nav_row.append(InlineKeyboardButton(
+            text="⬅️ Newer", callback_data=f"hist:{data.mode}:{data.page - 1}:{range_token}"))
+    if data.has_next:
+        nav_row.append(InlineKeyboardButton(
+            text="Older ➡️", callback_data=f"hist:{data.mode}:{data.page + 1}:{range_token}"))
+    if nav_row:
+        rows.append(nav_row)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _history_link_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📜 View Full Results History", callback_data="hist:all:0:all"),
+    ]])
+
+
+async def _load_history(
+    telegram_id: int, mode: str, page: int, range_token: str
+) -> tuple[Optional[HistoryResponse], str]:
+    """Fetches one history page; returns (response, range token actually used)."""
+    first, last = _resolve_range(range_token)
+    if not first:
+        range_token = "all"
+    path = f"/api/progress/history?mode={mode}&page={page}&page_size={HISTORY_PAGE_SIZE}"
+    if first and last:
+        path += f"&date_from={first.isoformat()}&date_to={last.isoformat()}"
+    history = await api_client.get(path=path, telegram_id=telegram_id, response_model=HistoryResponse)
+    return history, range_token
+
+
 
 # ─── Handler ─────────────────────────────────────────────────────────────────
 
@@ -223,4 +456,108 @@ async def my_progress_handler(message: Message, state: FSMContext) -> None:
         _format_progress(progress_data),
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
+    )
+    # Link to the full, time-based results history
+    if progress_data.recent_sessions:
+        await message.answer(
+            "📜 Want to see <b>all</b> your past results, by date?",
+            parse_mode="HTML",
+            reply_markup=_history_link_keyboard(),
+        )
+
+
+@router.callback_query(F.data.startswith("hist:"))
+async def results_history_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Shows one page of the results history; filter/day/page buttons edit it in place."""
+    parts = callback.data.split(":")
+    try:
+        mode, page = parts[1], max(0, int(parts[2]))
+    except (IndexError, ValueError):
+        await callback.answer()
+        return
+    range_token = parts[3] if len(parts) > 3 else "all"  # older buttons had no range
+    if mode not in HISTORY_MODES:
+        mode = "all"
+
+    # Any button press cancels a pending "type your dates" prompt
+    if await state.get_state() == ResultsHistory.entering_dates.state:
+        await state.clear()
+
+    history, range_token = await _load_history(callback.from_user.id, mode, page, range_token)
+    if not history:
+        await callback.answer("Could not load your history right now. Please try again.", show_alert=True)
+        return
+
+    text = _format_history(history, range_token)
+    keyboard = _history_keyboard(history, range_token)
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            # e.g. the old message can't be edited any more: send a fresh one
+            await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("histc:"))
+async def results_history_custom_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Asks the user to type the days they want to see."""
+    mode = callback.data.split(":", 1)[1]
+    await state.set_state(ResultsHistory.entering_dates)
+    await state.update_data(history_mode=mode if mode in HISTORY_MODES else "all")
+    today = _local_today()
+    await callback.message.answer(
+        "📆 <b>Choose your dates</b>\n\n"
+        "Type a date range (day/month/year):\n"
+        f"<code>01/{today:%m/%Y} - {today:%d/%m/%Y}</code>\n\n"
+        "Or one date to see a single day:\n"
+        f"<code>{today:%d/%m/%Y}</code>\n\n"
+        "<i>Send /cancel to go back.</i>",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(ResultsHistory.entering_dates)
+async def results_history_dates_entered(message: Message, state: FSMContext) -> None:
+    """Reads the typed date range and shows the history for it."""
+    text = (message.text or "").strip()
+
+    # Menu buttons and commands leave date entry and go to their normal handlers
+    if text in MAIN_MENU_TEXTS or (text.startswith("/") and text.lower() != "/cancel"):
+        await state.clear()
+        raise SkipHandler()
+    if text.lower() in ("/cancel", "cancel"):
+        await state.clear()
+        await message.answer("Date filter cancelled.", reply_markup=main_menu_keyboard())
+        return
+
+    try:
+        first, last = _parse_typed_range(text)
+    except ValueError as e:
+        # One retry message, then leave the state so other typing isn't treated as dates
+        await state.clear()
+        await message.answer(
+            f"⚠️ {esc(str(e))}\n\n"
+            "Example: <code>01/10/2026 - 04/11/2026</code>\n"
+            "Tap <b>📆 Custom</b> again to try once more.",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    mode = (await state.get_data()).get("history_mode", "all")
+    await state.clear()
+
+    history, range_token = await _load_history(message.from_user.id, mode, 0, _custom_token(first, last))
+    if not history:
+        await message.answer(
+            "⏳ Could not load your history right now. Please try again later.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+    await message.answer(
+        _format_history(history, range_token),
+        parse_mode="HTML",
+        reply_markup=_history_keyboard(history, range_token),
     )

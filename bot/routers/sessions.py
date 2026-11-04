@@ -832,8 +832,7 @@ async def end_session_callback(callback: CallbackQuery, state: FSMContext) -> No
         f"<b>Session Summary</b>\n"
         f"{divider}\n\n"
         f"<b>{grade_label}</b>\n\n"
-        f"Score: <b>{score} / {total}</b>\n"
-        f"Accuracy: <b>{pct:.1f}%</b>\n\n"
+        f"Score: <b>{score} / {total}</b> ({pct:.1f}%)\n\n"
         f"{divider}\n"
         f"<i>{esc(msg_text)}</i>"
     )
