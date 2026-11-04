@@ -82,6 +82,8 @@ class ProgressResponse(BaseModel):
 class MistakesSummary(BaseModel):
     has_pro: bool
     count: int
+    trial_tries_left: Optional[int] = None  # free trial only
+    trial_ai_left: Optional[int] = None
 
 
 class SessionStartResponse(BaseModel):
@@ -108,6 +110,10 @@ class MistakeListResponse(BaseModel):
     has_next: bool
     by_course: list[MistakeCourseCount] = []
     items: list[MistakeItem] = []
+    is_trial: bool = False
+    locked_count: int = 0
+    trial_tries_left: Optional[int] = None
+    trial_ai_left: Optional[int] = None
 
 
 class HistoryItem(BaseModel):
@@ -441,8 +447,11 @@ def _progress_links(data: ProgressResponse) -> tuple[str, InlineKeyboardMarkup]:
         mistakes_text = f"🔁 Review My Mistakes ({n})" if n else "🔁 Review My Mistakes"
         history_text = "📜 Full Results History"
     else:
-        lines.append("\n💎 <i>These are PRO features.</i>")
-        mistakes_text = "🔒 Review My Mistakes · PRO"
+        lines.append(
+            "\n🎁 <i>Try Review My Mistakes for free: see 3 mistakes, retry 3 questions "
+            "and get 1 AI explanation.</i>\n💎 <i>Full Results History is a PRO feature.</i>"
+        )
+        mistakes_text = "🎁 Review My Mistakes · Free trial"
         history_text = "🔒 Full Results History · PRO"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -452,9 +461,9 @@ def _progress_links(data: ProgressResponse) -> tuple[str, InlineKeyboardMarkup]:
     return "\n".join(lines), keyboard
 
 
-async def _send_pro_upsell(message: Message, feature: str) -> None:
+async def _send_pro_upsell(message: Message, feature: str, headline: Optional[str] = None) -> None:
     await message.answer(
-        f"🔒 <b>{esc(feature)} is a PRO feature.</b>\n\n"
+        f"🔒 <b>{esc(headline or f'{feature} is a PRO feature.')}</b>\n\n"
         "Upgrade to PRO to unlock:\n"
         "• 🔁 Review My Mistakes — practise only the questions you got wrong\n"
         "• 📜 Full Results History — with day and date-range filters\n"
@@ -550,23 +559,43 @@ TRY_AGAIN_PREFIX = "mt_"   # mt_<question_id>
 EXPLAIN_PREFIX = "me_"     # me_<question_id>_<your answer letter>
 
 
-async def _check_mistakes_access(message: Message, telegram_id: int) -> Optional[MistakesSummary]:
-    """PRO + something to review; otherwise tells the user why and returns None."""
+async def _check_mistakes_access(message: Message, telegram_id: int, action: str) -> Optional[MistakesSummary]:
+    """
+    action: "try" (retry one question), "ai" (AI explanation) or "all" (practice all mistakes).
+    PRO can do everything; free users get a small trial for "try" and "ai".
+    Tells the user why when not allowed (PRO message) and returns None.
+    """
     summary = await _get_mistakes_summary(telegram_id)
     if not summary:
         await message.answer("⏳ Could not load your mistakes right now. Please try again later.")
         return None
-    if not summary.has_pro:
-        await _send_pro_upsell(message, "Review My Mistakes")
-        return None
     if summary.count == 0:
         await message.answer(NO_MISTAKES_TEXT, parse_mode="HTML")
+        return None
+    if summary.has_pro:
+        return summary
+
+    if action == "all":
+        await _send_pro_upsell(message, "Practice all mistakes")
+        return None
+    if action == "try" and not summary.trial_tries_left:
+        await _send_pro_upsell(
+            message, "Review My Mistakes",
+            headline="You've used your 3 free tries. Upgrade to PRO to retry all your mistakes.",
+        )
+        return None
+    if action == "ai" and not summary.trial_ai_left:
+        await _send_pro_upsell(
+            message, "Review My Mistakes",
+            headline="You've used your free AI explanation. Upgrade to PRO for unlimited AI explanations.",
+        )
         return None
     return summary
 
 
 async def _start_review(
-    message: Message, state: FSMContext, telegram_id: int, intro: str, review_question_id: Optional[str] = None
+    message: Message, state: FSMContext, telegram_id: int, intro: str,
+    review_question_id: Optional[str] = None, is_trial: bool = False,
 ) -> None:
     """Starts a Review My Mistakes practice session (all mistakes, or one question) and sends question 1."""
     payload = {"mode": "practice", "review_mistakes": True}
@@ -579,6 +608,13 @@ async def _start_review(
         response_model=SessionStartResponse,
     )
     if not res:
+        if is_trial:
+            # Free trial only covers the newest few mistakes (or the tries ran out meanwhile)
+            await _send_pro_upsell(
+                message, "Review My Mistakes",
+                headline="The free trial covers your 3 newest mistakes. Upgrade to PRO to practise all of them.",
+            )
+            return
         await message.answer(
             "Couldn't start the review. If you already answered this question correctly, "
             "it has left your mistakes list — tap 🔁 Review My Mistakes in 📊 My Progress to see the rest.",
@@ -600,25 +636,30 @@ async def _start_review(
 
 async def try_mistake_again(message: Message, state: FSMContext, telegram_id: int, question_id: str) -> None:
     """Retries one wrong question as a one-question practice; a correct answer removes it from the list."""
-    if not await _check_mistakes_access(message, telegram_id):
+    summary = await _check_mistakes_access(message, telegram_id, "try")
+    if not summary:
         return
+    intro = "🔁 <b>Try again</b>\n\nAnswer correctly and this question leaves your mistakes list."
+    if not summary.has_pro:
+        left = summary.trial_tries_left - 1  # this try uses one
+        intro += f"\n\n🎁 <i>Free trial: {left} tr{'ies' if left != 1 else 'y'} left after this one.</i>"
     await _start_review(
-        message, state, telegram_id,
-        intro="🔁 <b>Try again</b>\n\nAnswer correctly and this question leaves your mistakes list.",
-        review_question_id=question_id,
+        message, state, telegram_id, intro=intro, review_question_id=question_id, is_trial=not summary.has_pro,
     )
 
 
 async def explain_mistake(message: Message, telegram_id: int, question_id: str, your_answer: str) -> None:
     """AI explanation of a wrong question, including why the student's answer was wrong."""
-    if not await _check_mistakes_access(message, telegram_id):
+    summary = await _check_mistakes_access(message, telegram_id, "ai")
+    if not summary:
         return
 
     thinking = await message.answer("<i>AI Tutor is analyzing your answer...</i>", parse_mode="HTML")
     explanation = await api_client.post(
         path="/api/ai/explain",
         telegram_id=telegram_id,
-        payload={"question_id": question_id, "user_answer": your_answer},
+        # "mistakes": free users use their Review My Mistakes trial explanation
+        payload={"question_id": question_id, "user_answer": your_answer, "source": "mistakes"},
         response_model=ExplanationResponse,
         timeout=60,
     )
@@ -630,13 +671,20 @@ async def explain_mistake(message: Message, telegram_id: int, question_id: str, 
     if not explanation or not explanation.success:
         msg = explanation.explanation if explanation and explanation.explanation else \
             "⏳ The AI tutor is currently busy. Please try again in a moment."
-        await message.answer(esc(msg))
+        # The backend's "free explanation used" message comes with the upgrade button
+        await message.answer(esc(msg), reply_markup=pro_plan_keyboard() if "PRO" in msg else None)
         return
 
     divider = "━" * 30
+    trial_note = ""
+    if not summary.has_pro:
+        trial_note = (
+            f"\n\n{divider}\n🎁 <i>That was your free AI explanation. "
+            "Upgrade to 💎 PRO for unlimited AI explanations on every mistake.</i>"
+        )
     await answer_long(
         message,
-        f"🧠 <b>AI Explanation</b>\n{divider}\n\n{esc(explanation.explanation)}",
+        f"🧠 <b>AI Explanation</b>\n{divider}\n\n{esc(explanation.explanation)}{trial_note}",
         parse_mode="HTML",
         protect_content=True,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -658,6 +706,12 @@ def _format_mistakes_list(data: MistakeListResponse, bot_username: str) -> str:
         if hidden > 0:
             lines.append(f"• <i>+{hidden} more course{'s' if hidden != 1 else ''}</i>")
     lines.append("<i>Answer a question correctly and it leaves this list.</i>")
+    if data.is_trial:
+        tries, ai = data.trial_tries_left or 0, data.trial_ai_left or 0
+        lines.append(
+            f"\n🎁 <b>Free trial:</b> {tries} tr{'ies' if tries != 1 else 'y'} · "
+            f"{ai} AI explanation{'s' if ai != 1 else ''} left"
+        )
     lines.append(divider)
 
     base = f"https://t.me/{bot_username}?start="
@@ -674,12 +728,28 @@ def _format_mistakes_list(data: MistakeListResponse, bot_username: str) -> str:
             f'    <a href="{try_link}">🔁 Try again</a>   ·   <a href="{ai_link}">🧠 Ask AI</a>',
         ]
 
+    if data.is_trial:
+        lines += ["", divider]
+        if data.locked_count:
+            lines.append(
+                f"🔒 <b>{data.locked_count} more mistake{'s' if data.locked_count != 1 else ''}</b> "
+                "— upgrade to 💎 PRO to see and practise all of them."
+            )
+        else:
+            lines.append("💎 <i>PRO: unlimited tries and AI explanations on every mistake.</i>")
+        return "\n".join(lines)
+
     pages = max(1, -(-data.total // data.page_size))
     lines += ["", divider, f"Page <b>{data.page + 1}</b> of <b>{pages}</b>"]
     return "\n".join(lines)
 
 
 def _mistakes_list_keyboard(data: MistakeListResponse) -> InlineKeyboardMarkup:
+    if data.is_trial:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔒 Practice all mistakes · PRO", callback_data="mistakes:start")],
+            *pro_plan_keyboard().inline_keyboard,
+        ])
     rows = []
     nav = []
     if data.page > 0:
@@ -714,11 +784,7 @@ async def mistakes_list_callback(callback: CallbackQuery) -> None:
     )
     await callback.answer()
     if not data:
-        summary = await _get_mistakes_summary(callback.from_user.id)
-        if summary and not summary.has_pro:
-            await _send_pro_upsell(callback.message, "Review My Mistakes")
-        else:
-            await callback.message.answer("⏳ Could not load your mistakes right now. Please try again later.")
+        await callback.message.answer("⏳ Could not load your mistakes right now. Please try again later.")
         return
     if data.total == 0:
         await callback.message.answer(NO_MISTAKES_TEXT, parse_mode="HTML")
@@ -755,7 +821,7 @@ async def review_mistakes_callback(callback: CallbackQuery, state: FSMContext) -
     if not callback.from_user or not callback.message:
         return
     await callback.answer()
-    summary = await _check_mistakes_access(callback.message, callback.from_user.id)
+    summary = await _check_mistakes_access(callback.message, callback.from_user.id, "all")
     if not summary:
         return
     to_review = min(summary.count, REVIEW_MISTAKES_LIMIT)
