@@ -11,10 +11,12 @@ from pydantic import BaseModel
 
 from bot.keyboards.inline import pro_plan_keyboard
 from bot.keyboards.reply import MAIN_MENU_TEXTS, main_menu_keyboard
+from bot.routers.ai_tutor import ExplanationResponse
 from bot.routers.sessions import send_question
+from bot.utils.watermark import embed_watermark
 from bot.states.session_states import ExamSession, ResultsHistory
 from bot.services.api_client import api_client
-from bot.utils.text import answer_long, esc
+from bot.utils.text import MAX_MESSAGE_LENGTH, answer_long, esc
 
 router = Router()
 
@@ -84,6 +86,28 @@ class MistakesSummary(BaseModel):
 
 class SessionStartResponse(BaseModel):
     session_id: str
+
+
+class MistakeItem(BaseModel):
+    question_id: str
+    prompt: str
+    your_answer: str
+    course_name: Optional[str] = None
+    answered_at: datetime
+
+
+class MistakeCourseCount(BaseModel):
+    course_name: str
+    count: int
+
+
+class MistakeListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    has_next: bool
+    by_course: list[MistakeCourseCount] = []
+    items: list[MistakeItem] = []
 
 
 class HistoryItem(BaseModel):
@@ -422,7 +446,7 @@ def _progress_links(data: ProgressResponse) -> tuple[str, InlineKeyboardMarkup]:
         history_text = "🔒 Full Results History · PRO"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=mistakes_text, callback_data="mistakes:start")],
+        [InlineKeyboardButton(text=mistakes_text, callback_data="mistakes:open")],
         [InlineKeyboardButton(text=history_text, callback_data="hist:all:0:all")],
     ])
     return "\n".join(lines), keyboard
@@ -515,58 +539,247 @@ async def my_progress_handler(message: Message, state: FSMContext) -> None:
     await message.answer(links_text, parse_mode="HTML", reply_markup=links_keyboard)
 
 
-@router.callback_query(F.data == "mistakes:start")
-async def review_mistakes_callback(callback: CallbackQuery, state: FSMContext) -> None:
-    """Starts a practice session made of the student's open mistakes (PRO only)."""
-    if not callback.from_user or not callback.message:
-        return
-    await callback.answer()
+NO_MISTAKES_TEXT = (
+    "🎉 <b>No mistakes to review!</b>\n\n"
+    "Every question you got wrong has since been answered correctly. "
+    "Keep practising — new mistakes will show up here."
+)
+MISTAKES_PAGE_SIZE = 5
+# Deep-link payloads used by the links inside the mistakes list (/start <payload>)
+TRY_AGAIN_PREFIX = "mt_"   # mt_<question_id>
+EXPLAIN_PREFIX = "me_"     # me_<question_id>_<your answer letter>
 
-    summary = await _get_mistakes_summary(callback.from_user.id)
+
+async def _check_mistakes_access(message: Message, telegram_id: int) -> Optional[MistakesSummary]:
+    """PRO + something to review; otherwise tells the user why and returns None."""
+    summary = await _get_mistakes_summary(telegram_id)
     if not summary:
-        await callback.message.answer("⏳ Could not load your mistakes right now. Please try again later.")
-        return
+        await message.answer("⏳ Could not load your mistakes right now. Please try again later.")
+        return None
     if not summary.has_pro:
-        await _send_pro_upsell(callback.message, "Review My Mistakes")
-        return
+        await _send_pro_upsell(message, "Review My Mistakes")
+        return None
     if summary.count == 0:
-        await callback.message.answer(
-            "🎉 <b>No mistakes to review!</b>\n\n"
-            "Every question you got wrong has since been answered correctly. "
-            "Keep practising — new mistakes will show up here.",
-            parse_mode="HTML",
-        )
-        return
+        await message.answer(NO_MISTAKES_TEXT, parse_mode="HTML")
+        return None
+    return summary
 
+
+async def _start_review(
+    message: Message, state: FSMContext, telegram_id: int, intro: str, review_question_id: Optional[str] = None
+) -> None:
+    """Starts a Review My Mistakes practice session (all mistakes, or one question) and sends question 1."""
+    payload = {"mode": "practice", "review_mistakes": True}
+    if review_question_id:
+        payload["review_question_id"] = review_question_id
     res = await api_client.post(
         path="/api/sessions/start",
-        telegram_id=callback.from_user.id,
-        payload={"mode": "practice", "review_mistakes": True},
+        telegram_id=telegram_id,
+        payload=payload,
         response_model=SessionStartResponse,
     )
     if not res:
-        await callback.message.answer(
-            "Failed to start the review. Please try again later.",
+        await message.answer(
+            "Couldn't start the review. If you already answered this question correctly, "
+            "it has left your mistakes list — tap 🔁 Review My Mistakes in 📊 My Progress to see the rest.",
             reply_markup=main_menu_keyboard(),
         )
         return
 
     if isinstance(res, dict) and res.get("detail", {}).get("error", {}).get("code") == "active_session_exists":
         session_id = res["detail"]["error"]["session_id"]
-        await callback.message.answer("You have an unfinished review. Resuming...")
+        await message.answer("You have an unfinished review. Resuming...")
     else:
         session_id = res.session_id
-        to_review = min(summary.count, REVIEW_MISTAKES_LIMIT)
-        await callback.message.answer(
-            f"🔁 <b>Review My Mistakes</b>\n\n"
-            f"{to_review} question{'s' if to_review != 1 else ''} you got wrong before. "
-            "Answer one correctly and it leaves your mistakes list.",
-            parse_mode="HTML",
-        )
+        await message.answer(intro, parse_mode="HTML")
 
     await state.update_data(session_id=session_id, mode="practice")
     await state.set_state(ExamSession.active)
-    await send_question(callback.message, state, session_id, callback.from_user.id)
+    await send_question(message, state, session_id, telegram_id)
+
+
+async def try_mistake_again(message: Message, state: FSMContext, telegram_id: int, question_id: str) -> None:
+    """Retries one wrong question as a one-question practice; a correct answer removes it from the list."""
+    if not await _check_mistakes_access(message, telegram_id):
+        return
+    await _start_review(
+        message, state, telegram_id,
+        intro="🔁 <b>Try again</b>\n\nAnswer correctly and this question leaves your mistakes list.",
+        review_question_id=question_id,
+    )
+
+
+async def explain_mistake(message: Message, telegram_id: int, question_id: str, your_answer: str) -> None:
+    """AI explanation of a wrong question, including why the student's answer was wrong."""
+    if not await _check_mistakes_access(message, telegram_id):
+        return
+
+    thinking = await message.answer("<i>AI Tutor is analyzing your answer...</i>", parse_mode="HTML")
+    explanation = await api_client.post(
+        path="/api/ai/explain",
+        telegram_id=telegram_id,
+        payload={"question_id": question_id, "user_answer": your_answer},
+        response_model=ExplanationResponse,
+        timeout=60,
+    )
+    try:
+        await thinking.delete()
+    except Exception:
+        pass
+
+    if not explanation or not explanation.success:
+        msg = explanation.explanation if explanation and explanation.explanation else \
+            "⏳ The AI tutor is currently busy. Please try again in a moment."
+        await message.answer(esc(msg))
+        return
+
+    divider = "━" * 30
+    await answer_long(
+        message,
+        f"🧠 <b>AI Explanation</b>\n{divider}\n\n{esc(explanation.explanation)}",
+        parse_mode="HTML",
+        protect_content=True,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🔁 Try this question again", callback_data=f"mtry:{question_id}"),
+        ]]),
+    )
+
+
+def _format_mistakes_list(data: MistakeListResponse, bot_username: str) -> str:
+    """Summary + numbered wrong questions, each with Try again / Ask AI links."""
+    divider = "━" * 30
+    lines = ["🔁 <b>Review My Mistakes</b>", divider, "📊 <b>Summary</b>"]
+    lines.append(f"You have <b>{data.total}</b> question{'s' if data.total != 1 else ''} to fix.")
+    if data.by_course:
+        shown = data.by_course[:5]
+        for c in shown:
+            lines.append(f"• {esc(c.course_name)} — <b>{c.count}</b>")
+        hidden = len(data.by_course) - len(shown)
+        if hidden > 0:
+            lines.append(f"• <i>+{hidden} more course{'s' if hidden != 1 else ''}</i>")
+    lines.append("<i>Answer a question correctly and it leaves this list.</i>")
+    lines.append(divider)
+
+    base = f"https://t.me/{bot_username}?start="
+    start_no = data.page * data.page_size
+    for i, item in enumerate(data.items, start=start_no + 1):
+        when = item.answered_at.astimezone(LOCAL_TZ).strftime("%b %d")
+        course = f"{esc(item.course_name)} · " if item.course_name else ""
+        try_link = f'{base}{TRY_AGAIN_PREFIX}{item.question_id}'
+        ai_link = f'{base}{EXPLAIN_PREFIX}{item.question_id}_{item.your_answer}'
+        lines += [
+            "",
+            f"<b>{i}.</b> {esc(item.prompt)}",
+            f"    <i>{course}{when}</i>",
+            f'    <a href="{try_link}">🔁 Try again</a>   ·   <a href="{ai_link}">🧠 Ask AI</a>',
+        ]
+
+    pages = max(1, -(-data.total // data.page_size))
+    lines += ["", divider, f"Page <b>{data.page + 1}</b> of <b>{pages}</b>"]
+    return "\n".join(lines)
+
+
+def _mistakes_list_keyboard(data: MistakeListResponse) -> InlineKeyboardMarkup:
+    rows = []
+    nav = []
+    if data.page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Newer", callback_data=f"mistakes:page:{data.page - 1}"))
+    if data.has_next:
+        nav.append(InlineKeyboardButton(text="Older ➡️", callback_data=f"mistakes:page:{data.page + 1}"))
+    if nav:
+        rows.append(nav)
+    practice_n = min(data.total, REVIEW_MISTAKES_LIMIT)
+    rows.append([InlineKeyboardButton(
+        text=f"▶️ Practice all mistakes ({practice_n})", callback_data="mistakes:start")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data == "mistakes:open")
+@router.callback_query(F.data.startswith("mistakes:page:"))
+async def mistakes_list_callback(callback: CallbackQuery) -> None:
+    """The list of wrong questions with a summary; Newer/Older edit the same message."""
+    if not callback.from_user or not callback.message:
+        return
+    is_open = callback.data == "mistakes:open"
+    try:
+        page = 0 if is_open else max(0, int(callback.data.rsplit(":", 1)[1]))
+    except ValueError:
+        await callback.answer()
+        return
+
+    data = await api_client.get(
+        path=f"/api/progress/mistakes/list?page={page}&page_size={MISTAKES_PAGE_SIZE}",
+        telegram_id=callback.from_user.id,
+        response_model=MistakeListResponse,
+    )
+    await callback.answer()
+    if not data:
+        summary = await _get_mistakes_summary(callback.from_user.id)
+        if summary and not summary.has_pro:
+            await _send_pro_upsell(callback.message, "Review My Mistakes")
+        else:
+            await callback.message.answer("⏳ Could not load your mistakes right now. Please try again later.")
+        return
+    if data.total == 0:
+        await callback.message.answer(NO_MISTAKES_TEXT, parse_mode="HTML")
+        return
+
+    bot_username = (await callback.bot.me()).username
+    text = embed_watermark(_format_mistakes_list(data, bot_username), callback.from_user.id)
+    keyboard = _mistakes_list_keyboard(data)
+    if not is_open and len(text) <= MAX_MESSAGE_LENGTH:
+        try:
+            await callback.message.edit_text(
+                text, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
+            return
+        except TelegramBadRequest as e:
+            if "message is not modified" in str(e):
+                return
+    await answer_long(
+        callback.message, text, parse_mode="HTML", reply_markup=keyboard,
+        protect_content=True, disable_web_page_preview=True,
+    )
+
+
+@router.callback_query(F.data.startswith("mtry:"))
+async def mistake_try_again_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    if not callback.from_user or not callback.message:
+        return
+    await callback.answer()
+    await try_mistake_again(callback.message, state, callback.from_user.id, callback.data.split(":", 1)[1])
+
+
+@router.callback_query(F.data == "mistakes:start")
+async def review_mistakes_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Starts a practice session made of the student's open mistakes (PRO only)."""
+    if not callback.from_user or not callback.message:
+        return
+    await callback.answer()
+    summary = await _check_mistakes_access(callback.message, callback.from_user.id)
+    if not summary:
+        return
+    to_review = min(summary.count, REVIEW_MISTAKES_LIMIT)
+    await _start_review(
+        callback.message, state, callback.from_user.id,
+        intro=(
+            f"🔁 <b>Review My Mistakes</b>\n\n"
+            f"{to_review} question{'s' if to_review != 1 else ''} you got wrong before. "
+            "Answer one correctly and it leaves your mistakes list."
+        ),
+    )
+
+
+async def handle_mistake_deep_link(message: Message, state: FSMContext, payload: str) -> bool:
+    """Handles the Try again / Ask AI links in the mistakes list. True if the payload was ours."""
+    if payload.startswith(TRY_AGAIN_PREFIX):
+        await try_mistake_again(message, state, message.from_user.id, payload[len(TRY_AGAIN_PREFIX):])
+        return True
+    if payload.startswith(EXPLAIN_PREFIX):
+        question_id, _, your_answer = payload[len(EXPLAIN_PREFIX):].rpartition("_")
+        if question_id and your_answer in ("A", "B", "C", "D"):
+            await explain_mistake(message, message.from_user.id, question_id, your_answer)
+            return True
+    return False
 
 
 @router.callback_query(F.data.startswith("hist:"))

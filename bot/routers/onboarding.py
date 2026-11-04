@@ -174,6 +174,11 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
             from bot.routers.ai_tutor import handle_ai_explanation
             await handle_ai_explanation(message, state, qtoken, message.from_user.id)
             return
+        elif payload.startswith(("mt_", "me_")):
+            # "Try again" / "Ask AI" links in the Review My Mistakes list
+            from bot.routers.progress import handle_mistake_deep_link
+            if await handle_mistake_deep_link(message, state, payload):
+                return
         elif payload.startswith("ref_"):
             ref_code = payload.split("_", 1)[1]
             await state.update_data(temp_ref_code=ref_code)
