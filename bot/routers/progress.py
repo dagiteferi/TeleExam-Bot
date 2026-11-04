@@ -146,7 +146,7 @@ class HistoryResponse(BaseModel):
 LOCAL_TZ = timezone(timedelta(hours=3))
 HISTORY_PAGE_SIZE = 10
 REVIEW_MISTAKES_LIMIT = 20  # must match the backend's limit per review session
-HISTORY_MODES = {"all": "All", "exam": "📝 Exams", "practice": "🎯 Practice"}
+HISTORY_MODES = {"all": "All", "exam": "Exams", "practice": "Practice"}
 # Quick day filters. A custom range is encoded as "YYYYMMDD-YYYYMMDD".
 RANGE_PRESETS = {
     "today": "Today",
@@ -162,107 +162,202 @@ _TYPED_DATE_RE = re.compile(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})|(\d{1,2})[-/.]
 
 # ─── Formatting helpers ───────────────────────────────────────────────────────
 
-def _accuracy_bar(percent: float, width: int = 10) -> str:
-    """Render a simple ASCII progress bar for accuracy."""
-    filled = round(percent / 100 * width)
-    bar = "█" * filled + "░" * (width - filled)
-    return f"[{bar}] {percent:.1f}%"
+# Colour bands used everywhere on the dashboard so a glance tells the story.
+GOOD_PERCENT = 75
+FAIR_PERCENT = 50
+MAX_COURSES_SHOWN = 15
+MIN_ANSWERS_FOR_INSIGHT = 5  # ignore courses with too few answers when picking strongest/weakest
 
 
-def _trend_arrow(scores: list[float]) -> str:
-    """Show a simple trend indicator based on last 2 scores."""
-    if len(scores) < 2:
-        return ""
-    diff = scores[-1] - scores[-2]
-    if diff > 3:
-        return "(Improving)"
-    elif diff < -3:
-        return "(Declining)"
-    else:
-        return "(Steady)"
+def _rating(percent: float) -> str:
+    if percent >= GOOD_PERCENT:
+        return "Strong"
+    if percent >= FAIR_PERCENT:
+        return "Fair"
+    return "Weak"
 
 
-def _format_progress(data: ProgressResponse) -> str:
-    divider = "━" * 30
+def _level_label(percent: float) -> str:
+    if percent >= 85:
+        return "Excellent"
+    if percent >= GOOD_PERCENT:
+        return "Good"
+    if percent >= FAIR_PERCENT:
+        return "Fair"
+    return "Needs improvement"
 
-    lines = ["<b>📊 Your Progress Dashboard</b>"]
+
+def _bar(percent: float, width: int = 10) -> str:
+    """Text progress bar, e.g. ▰▰▰▰▰▰▱▱▱▱."""
+    filled = max(0, min(width, round(percent / 100 * width)))
+    return "▰" * filled + "▱" * (width - filled)
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _title(text: str) -> str:
+    return f"<b>{text}</b>"
+
+
+def _section_header(data: ProgressResponse) -> str:
+    pct = data.overall_accuracy_percent
+    lines = [_title("MY PROGRESS")]
     if data.department_name:
-        lines.append(f"📚 Department: <b>{esc(data.department_name.title())}</b>")
-    lines.append(divider)
-
-    # In-Progress / Stopped Session Status
-    if data.active_session_info:
-        info = data.active_session_info
-        mode_label = "📝 Exam Mode" if info.mode == "exam" else "🎯 Practice Mode"
-        lines += [
-            "⏸ <b>Current / Paused Session</b>",
-            f"Mode: <b>{mode_label}</b>",
-            f"Content: <b>{esc(info.title)}</b>",
-            f"Stopped at: <b>Question {info.current_question_index} of {info.total_questions}</b>",
-            divider,
-        ]
-
-    # Overall header
+        lines.append(f"<i>{esc(data.department_name.title())}</i>")
     lines += [
-        "<b>Overall Statistics</b>",
-        f"Exams taken:        <b>{data.total_exams_taken}</b>",
-        f"Practice sessions:  <b>{data.total_practice_sessions}</b>",
-        f"Correct answers:    <b>{data.total_correct}</b>",
-        f"Incorrect answers:  <b>{data.total_wrong}</b>",
         "",
-        "<b>Overall Accuracy</b>",
-        f"    {_accuracy_bar(data.overall_accuracy_percent)}",
+        f"<b>Overall accuracy: {pct:.0f}%</b> ({_level_label(pct)})",
+        _bar(pct),
+        f"Correct: <b>{data.total_correct}</b>  |  Wrong: <b>{data.total_wrong}</b>  |  "
+        f"Answered: <b>{data.total_questions_answered}</b>",
+        f"Exams: <b>{data.total_exams_taken}</b>  |  Practice sessions: <b>{data.total_practice_sessions}</b>",
     ]
-
-    # Top Exam Results
-    if data.top_exam_scores:
-        lines += ["", divider, "🏆 <b>Top Exam Results</b>"]
-        for top in data.top_exam_scores:
-            lines.append(f"• <b>{esc(top.title)}</b> — <b>{top.top_score_percent:.1f}%</b> ({top.total_questions} Qs)")
-
-    # Score trend
-    if data.recent_exam_scores:
-        trend = _trend_arrow(data.recent_exam_scores)
-        recent_str = " → ".join(f"{s:.0f}%" for s in data.recent_exam_scores)
-        lines += [
-            "",
-            divider,
-            f"<b>Recent Exam Scores</b> {trend}",
-            f"    {recent_str}",
-        ]
-
-    # Per-course breakdown
-    if data.course_breakdown:
-        lines += ["", divider, "<b>Per-Course Accuracy</b>"]
-        for c in data.course_breakdown:
-            lines.append(f"• <b>{esc(c.course_name)}</b>")
-            lines.append(f"    {_accuracy_bar(c.accuracy_percent, 8)}  ({c.correct}/{c.total_answered} correct)")
-
-    # Weak topics
-    if data.weak_topics:
-        lines += ["", divider, "⚠️ <b>Topics Requiring Attention</b>"]
-        for t in data.weak_topics:
-            if t.attempted:
-                lines.append(
-                    f"• {esc(t.topic_name)} — <b>{t.error_count} of {t.attempted}</b> wrong "
-                    f"({t.error_rate_percent:.0f}%)"
-                )
-            else:  # older backend without the rate fields
-                lines.append(f"• {esc(t.topic_name)} — <b>{t.error_count}</b> mistakes")
-        lines.append("<i>Based on your last answers in each topic — it updates as you improve.</i>")
-
-    # Recent History
-    if data.recent_sessions:
-        lines += ["", divider, "🗓 <b>Recent History</b>"]
-        for sess in data.recent_sessions:
-            date_str = sess.submitted_at.strftime("%b %d, %Y")
-            mode_icon = "📝" if sess.mode == "exam" else "🎯"
-            # e.g. "Sep 17, 2026 - 📝 Midterm Exam"
-            lines.append(f"• {mode_icon} <b>{esc(sess.title)}</b> ({date_str})")
-            lines.append(f"    Score: <b>{sess.score_percent:.1f}%</b>")
-
-    lines += ["", divider, "<i>Consistent practice leads to consistent improvement.</i>"]
     return "\n".join(lines)
+
+
+def _section_focus(data: ProgressResponse) -> Optional[str]:
+    """The few things worth acting on, pulled out of the numbers below."""
+    tips = []
+    rated = [c for c in data.course_breakdown if c.total_answered >= MIN_ANSWERS_FOR_INSIGHT] \
+        or data.course_breakdown
+    if len(rated) >= 2:
+        best = max(rated, key=lambda c: c.accuracy_percent)
+        worst = min(rated, key=lambda c: c.accuracy_percent)
+        if worst.accuracy_percent < best.accuracy_percent:
+            tips.append(f"Weakest course: <b>{esc(worst.course_name)}</b> ({worst.accuracy_percent:.0f}%)")
+            tips.append(f"Strongest course: <b>{esc(best.course_name)}</b> ({best.accuracy_percent:.0f}%)")
+    if data.weak_topics:
+        t = data.weak_topics[0]
+        detail = f"{t.error_count} of {t.attempted} wrong" if t.attempted else _plural(t.error_count, "mistake")
+        tips.append(f"Hardest topic: <b>{esc(t.topic_name)}</b> ({detail})")
+    if data.mistakes_to_review:
+        tips.append(f"Mistakes to review: <b>{data.mistakes_to_review}</b>")
+    if not tips:
+        return None
+    return _title("KEY INSIGHTS") + "\n<blockquote>" + "\n".join(tips) + "</blockquote>"
+
+
+def _section_active(data: ProgressResponse) -> Optional[str]:
+    info = data.active_session_info
+    if not info:
+        return None
+    mode = "Exam" if info.mode == "exam" else "Practice"
+    lines = [
+        f"{mode}: <b>{esc(info.title)}</b>",
+        f"Stopped at question <b>{info.current_question_index}</b> of {info.total_questions} "
+        f"({info.answered_count} answered)",
+    ]
+    return _title("UNFINISHED SESSION") + "\n<blockquote>" + "\n".join(lines) + "</blockquote>"
+
+
+def _course_row(c: CourseProgress) -> str:
+    return (
+        f"<b>{esc(c.course_name)}</b>: {c.accuracy_percent:.0f}% ({_rating(c.accuracy_percent)})\n"
+        f"{_bar(c.accuracy_percent)}  <i>{c.correct} of {c.total_answered} correct</i>"
+    )
+
+
+def _section_courses(data: ProgressResponse) -> Optional[str]:
+    if not data.course_breakdown:
+        return None
+    # Weakest first: that is where the next study hour pays off most
+    courses = sorted(data.course_breakdown, key=lambda c: (c.accuracy_percent, -c.total_answered))
+    shown, hidden = courses[:MAX_COURSES_SHOWN], len(courses) - MAX_COURSES_SHOWN
+    first, rest = shown[:5], shown[5:]
+    lines = [_title("ACCURACY BY COURSE") + " <i>(weakest first)</i>", "\n\n".join(_course_row(c) for c in first)]
+    if rest:
+        more = "\n\n".join(_course_row(c) for c in rest)
+        if hidden > 0:
+            more += f"\n\n<i>{_plural(hidden, 'more course')} not shown</i>"
+        lines.append(f"<blockquote expandable>{more}</blockquote>")
+    lines.append(
+        f"<i>Strong: {GOOD_PERCENT}% and above  |  Fair: {FAIR_PERCENT}–{GOOD_PERCENT - 1}%  |  "
+        f"Weak: below {FAIR_PERCENT}%</i>"
+    )
+    return "\n".join(lines)
+
+
+def _section_weak_topics(data: ProgressResponse) -> Optional[str]:
+    if not data.weak_topics:
+        return None
+    lines = [_title("TOPICS TO WORK ON")]
+    for i, t in enumerate(data.weak_topics, start=1):
+        if t.attempted:
+            lines.append(
+                f"{i}. {esc(t.topic_name)}: <b>{t.error_count} of {t.attempted}</b> wrong "
+                f"({t.error_rate_percent:.0f}%)"
+            )
+        else:  # older backend without the rate fields
+            lines.append(f"{i}. {esc(t.topic_name)}: <b>{_plural(t.error_count, 'mistake')}</b>")
+    lines.append("<i>Based on your latest answers in each topic. It updates as you improve.</i>")
+    return "\n".join(lines)
+
+
+def _section_exams(data: ProgressResponse) -> Optional[str]:
+    parts = []
+    scores = data.recent_exam_scores
+    if len(scores) == 1:
+        parts.append(_title("EXAM SCORES") + f"\nLatest: <b>{scores[0]:.0f}%</b>")
+    elif scores:
+        diff = scores[-1] - scores[-2]
+        if diff > 3:
+            trend = f"up {diff:.0f} points, improving"
+        elif diff < -3:
+            trend = f"down {-diff:.0f} points, dropping"
+        else:
+            trend = "steady"
+        parts.append(
+            _title("EXAM SCORES")
+            + "\nRecent: " + " → ".join(f"{s:.0f}%" for s in scores)
+            + f"\nLatest: <b>{scores[-1]:.0f}%</b> ({trend})"
+        )
+    if data.top_exam_scores:
+        rows = [
+            f"{i}. {esc(t.title)}: <b>{t.top_score_percent:.0f}%</b> <i>({t.total_questions} questions)</i>"
+            for i, t in enumerate(data.top_exam_scores, start=1)
+        ]
+        parts.append(_title("BEST EXAM RESULTS") + "\n" + "\n".join(rows))
+    return "\n\n".join(parts) or None
+
+
+def _section_recent(data: ProgressResponse) -> Optional[str]:
+    if not data.recent_sessions:
+        return None
+    rows = []
+    for s in data.recent_sessions:
+        mode = "Exam" if s.mode == "exam" else "Practice"
+        when = s.submitted_at.astimezone(LOCAL_TZ).strftime("%b %d")
+        rows.append(f"{when}  |  {mode}: {esc(s.title)}  |  <b>{s.score_percent:.0f}%</b>")
+    return _title("RECENT ACTIVITY") + "\n<blockquote expandable>" + "\n".join(rows) + "</blockquote>"
+
+
+def _progress_messages(data: ProgressResponse) -> list[str]:
+    """
+    The dashboard as message texts. Sections are packed whole into each message, so a
+    long dashboard never splits inside a <blockquote> (which would break the HTML).
+    """
+    sections = [
+        _section_header(data),
+        _section_focus(data),
+        _section_active(data),
+        _section_courses(data),
+        _section_weak_topics(data),
+        _section_exams(data),
+        _section_recent(data),
+    ]
+    messages, current = [], ""
+    for section in filter(None, sections):
+        candidate = f"{current}\n\n{section}" if current else section
+        if current and len(candidate) > MAX_MESSAGE_LENGTH:
+            messages.append(current)
+            current = section
+        else:
+            current = candidate
+    if current:
+        messages.append(current)
+    return messages
 
 
 def _format_duration(seconds: int) -> str:
@@ -344,71 +439,72 @@ def _parse_typed_range(text: str) -> tuple[date, date]:
 
 def _format_history(data: HistoryResponse, range_token: str = "all") -> str:
     """Results history grouped by month, newest first."""
-    divider = "━" * 30
-    lines = [f"<b>📜 Results History — {HISTORY_MODES.get(data.mode, 'All')}</b>"]
+    lines = ["<b>RESULTS HISTORY</b>"]
     if data.department_name:
-        lines.append(f"📚 Department: <b>{esc(data.department_name.title())}</b>")
+        lines.append(f"<i>{esc(data.department_name.title())}</i>")
     period = _format_period(data.date_from, data.date_to)
     preset = RANGE_PRESETS.get(range_token)
     if period:
         label = f"{preset} ({period})" if preset else period
-        lines.append(f"📅 Period: <b>{label}</b>")
     else:
-        lines.append("📅 Period: <b>All time</b>")
-    lines.append(divider)
+        label = "All time"
+    lines += [
+        "",
+        f"Showing: <b>{HISTORY_MODES.get(data.mode, 'All')}</b>",
+        f"Period: <b>{label}</b>",
+        f"Results found: <b>{data.total}</b>",
+    ]
 
     if not data.items:
-        lines.append(
-            "No results in this period. Try a wider range."
-            if period else "No finished sessions here yet."
-        )
+        lines += ["", "No results in this period. Try a wider date range."
+                  if period else "No completed sessions yet."]
         return "\n".join(lines)
 
     current_month = None
     for item in data.items:
         local = item.submitted_at.astimezone(LOCAL_TZ)
-        month = local.strftime("%B %Y")
+        month = local.strftime("%B %Y").upper()
         if month != current_month:
             current_month = month
-            lines += ["", f"🗓 <b>{month}</b>"]
+            lines += ["", f"<b>{month}</b>"]
 
-        icon = "📝" if item.mode == "exam" else "🎯"
-        details = [local.strftime("%b %d, %H:%M")]
+        mode = "Exam" if item.mode == "exam" else "Practice"
+        details = [local.strftime("%b %d, %H:%M"), mode]
         duration = _format_duration(item.duration_seconds)
         if duration:
-            details.append(f"⏱ {duration}")
+            details.append(duration)
         skipped = item.question_count - item.correct_count - item.wrong_count
         if item.mode != "practice" and skipped > 0:
             details.append(f"{skipped} skipped")
 
-        lines.append(f"{icon} <b>{esc(item.title)}</b>")
-        lines.append(
-            f"    Score: <b>{item.score_percent:.1f}%</b> "
-            f"({item.correct_count}/{item.question_count})"
-        )
-        lines.append(f"    <i>{' · '.join(details)}</i>")
+        lines += [
+            "",
+            f"<b>{esc(item.title)}</b>",
+            f"Score: <b>{item.score_percent:.0f}%</b> ({_rating(item.score_percent)})  |  "
+            f"{item.correct_count} of {item.question_count} correct",
+            f"<i>{'  |  '.join(details)}</i>",
+        ]
 
     if data.is_trial:
-        lines += ["", divider, f"🎁 <i>Free preview: your {len(data.items)} newest result"
-                               f"{'s' if len(data.items) != 1 else ''} here.</i>"]
+        lines += ["", f"<blockquote><b>Free preview</b>\nShowing your {_plural(len(data.items), 'most recent result')}."]
         if data.locked_count:
-            lines.append(
-                f"🔒 <b>{data.locked_count} more result{'s' if data.locked_count != 1 else ''}</b> "
-                "in this view — upgrade to 💎 PRO to see your full history."
+            lines[-1] += (
+                f"\n{_plural(data.locked_count, 'more result')} in this view. "
+                "Upgrade to PRO to see your full history."
             )
+        lines[-1] += "</blockquote>"
         return "\n".join(lines)
 
     pages = max(1, -(-data.total // data.page_size))
-    lines += ["", divider, f"Page <b>{data.page + 1}</b> of <b>{pages}</b> · {data.total} results in total"]
+    lines += ["", f"<i>Page {data.page + 1} of {pages}</i>"]
     return "\n".join(lines)
 
 
 def _history_toast(data: HistoryResponse, range_token: str) -> str:
-    """Short pop-up confirming the filter just applied, e.g. '✅ Last 7 days · 📝 Exams — 5 results'."""
+    """Short pop-up confirming the filter just applied, e.g. 'Last 7 days, Exams: 5 results'."""
     period = RANGE_PRESETS.get(range_token) or _format_period(data.date_from, data.date_to) or "All time"
     mode = HISTORY_MODES.get(data.mode, "All")
-    n = data.total
-    toast = f"✅ {period} · {mode} — {n} result{'s' if n != 1 else ''}"
+    toast = f"{period}, {mode}: {_plural(data.total, 'result')}"
     if data.page > 0:
         toast += f" (page {data.page + 1})"
     return toast[:200]  # Telegram limit for callback answers
@@ -428,7 +524,7 @@ def _history_keyboard(data: HistoryResponse, range_token: str) -> InlineKeyboard
     Callback format: hist:<mode>:<page>:<range>, where range is a preset or YYYYMMDD-YYYYMMDD.
     """
     def mark(selected: bool, text: str) -> str:
-        return f"✅ {text}" if selected else text
+        return f"✓ {text}" if selected else text
 
     def range_btn(token: str, text: str) -> InlineKeyboardButton:
         return InlineKeyboardButton(
@@ -446,17 +542,17 @@ def _history_keyboard(data: HistoryResponse, range_token: str) -> InlineKeyboard
         [
             range_btn("30d", "30 days"),
             range_btn("all", "All time"),
-            InlineKeyboardButton(text=mark(is_custom, "📆 Custom"), callback_data=f"histc:{data.mode}"),
+            InlineKeyboardButton(text=mark(is_custom, "Custom dates"), callback_data=f"histc:{data.mode}"),
         ],
     ]
 
     nav_row = []
     if data.page > 0:
         nav_row.append(InlineKeyboardButton(
-            text="⬅️ Newer", callback_data=f"hist:{data.mode}:{data.page - 1}:{range_token}"))
+            text="‹ Newer", callback_data=f"hist:{data.mode}:{data.page - 1}:{range_token}"))
     if data.has_next:
         nav_row.append(InlineKeyboardButton(
-            text="Older ➡️", callback_data=f"hist:{data.mode}:{data.page + 1}:{range_token}"))
+            text="Older ›", callback_data=f"hist:{data.mode}:{data.page + 1}:{range_token}"))
     if nav_row:
         rows.append(nav_row)
     if data.is_trial and data.locked_count:
@@ -467,27 +563,23 @@ def _history_keyboard(data: HistoryResponse, range_token: str) -> InlineKeyboard
 def _progress_links(data: ProgressResponse) -> tuple[str, InlineKeyboardMarkup]:
     """The PRO links shown under the dashboard: Review My Mistakes and Full Results History."""
     n = data.mistakes_to_review
-    mistakes_line = (
-        f"🔁 <b>Review My Mistakes</b> — practise the <b>{n}</b> question{'s' if n != 1 else ''} you got wrong"
-        if n else "🔁 <b>Review My Mistakes</b> — practise the questions you got wrong"
-    )
     lines = [
-        "<b>📌 Go further</b>",
-        mistakes_line,
-        "📜 <b>Full Results History</b> — every result, filter by day or date range",
+        _title("NEXT STEPS"),
+        "<b>Review My Mistakes</b>: " + (f"{_plural(n, 'question')} to fix" if n else "retry the questions you got wrong"),
+        "<b>Results History</b>: every result, filtered by day or date range",
     ]
     if data.has_pro:
-        mistakes_text = f"🔁 Review My Mistakes ({n})" if n else "🔁 Review My Mistakes"
-        history_text = "📜 Full Results History"
+        mistakes_text = f"Review My Mistakes ({n})" if n else "Review My Mistakes"
+        history_text = "Full Results History"
     else:
         lines.append(
-            "\n🎁 <b>Free trial</b>\n"
-            "<i>• Review My Mistakes: see 3 mistakes, retry 3 questions, 1 AI explanation\n"
-            "• Results History: your 3 newest results in every view and day filter\n"
-            "💎 PRO unlocks everything.</i>"
+            "\n<blockquote><b>Free trial</b>\n"
+            "Mistakes: view 3, retry 3, 1 AI explanation\n"
+            "History: your 3 most recent results\n"
+            "<i>Upgrade to PRO for full access.</i></blockquote>"
         )
-        mistakes_text = "🎁 Review My Mistakes · Free trial"
-        history_text = "🎁 Results History · Free preview"
+        mistakes_text = "Review My Mistakes (Free trial)"
+        history_text = "Results History (Free preview)"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=mistakes_text, callback_data="mistakes:open")],
@@ -498,11 +590,11 @@ def _progress_links(data: ProgressResponse) -> tuple[str, InlineKeyboardMarkup]:
 
 async def _send_pro_upsell(message: Message, feature: str, headline: Optional[str] = None) -> None:
     await message.answer(
-        f"🔒 <b>{esc(headline or f'{feature} is a PRO feature.')}</b>\n\n"
-        "Upgrade to PRO to unlock:\n"
-        "• 🔁 Review My Mistakes — practise only the questions you got wrong\n"
-        "• 📜 Full Results History — with day and date-range filters\n"
-        "• 🤖 Unlimited AI Tutor and personalized study plans",
+        f"<b>{esc(headline or f'{feature} is a PRO feature.')}</b>\n\n"
+        "PRO includes:\n"
+        "<blockquote>Review My Mistakes: practise only the questions you got wrong\n"
+        "Full Results History: with day and date-range filters\n"
+        "Unlimited AI Tutor and personalised study plans</blockquote>",
         parse_mode="HTML",
         reply_markup=pro_plan_keyboard(),
     )
@@ -542,7 +634,7 @@ async def my_progress_handler(message: Message, state: FSMContext) -> None:
         return
 
     loading_msg = await message.answer(
-        "📊 <i>Loading your progress...</i>", parse_mode="HTML"
+        "<i>Loading your progress...</i>", parse_mode="HTML"
     )
 
     progress_data = await api_client.get(
@@ -565,26 +657,26 @@ async def my_progress_handler(message: Message, state: FSMContext) -> None:
 
     if progress_data.total_questions_answered == 0:
         await message.answer(
-            "<b>No activity recorded yet.</b>\n\n"
-            "Complete a session in Practice Mode or Exam Mode to view your statistics here.",
+            "<b>MY PROGRESS</b>\n\n"
+            "No activity yet. Your dashboard fills in after your first session.\n\n"
+            "<blockquote><b>Practice Mode</b>: learn with instant feedback\n"
+            "<b>Exam Mode</b>: test yourself under real exam conditions</blockquote>\n"
+            "Complete one to see your accuracy, strongest and weakest courses, "
+            "and the topics to focus on.",
             parse_mode="HTML",
             reply_markup=main_menu_keyboard(),
         )
         return
 
-    await answer_long(
-        message,
-        _format_progress(progress_data),
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
-    )
+    for text in _progress_messages(progress_data):
+        await answer_long(message, text, parse_mode="HTML", reply_markup=main_menu_keyboard())
     # Clear links to the PRO features: Review My Mistakes and Full Results History
     links_text, links_keyboard = _progress_links(progress_data)
     await message.answer(links_text, parse_mode="HTML", reply_markup=links_keyboard)
 
 
 NO_MISTAKES_TEXT = (
-    "🎉 <b>No mistakes to review!</b>\n\n"
+    "<b>No mistakes to review.</b>\n\n"
     "Every question you got wrong has since been answered correctly. "
     "Keep practising — new mistakes will show up here."
 )
@@ -655,7 +747,7 @@ async def _start_review(
             return
         await message.answer(
             "Couldn't start the review. If you already answered this question correctly, "
-            "it has left your mistakes list — tap 🔁 Review My Mistakes in 📊 My Progress to see the rest.",
+            "it has left your mistakes list — open My Progress and tap Review My Mistakes to see the rest.",
             reply_markup=main_menu_keyboard(),
         )
         return
@@ -688,15 +780,15 @@ async def try_mistake_again(message: Message, state: FSMContext, telegram_id: in
     if not summary:
         return
     intro = (
-        "🔁 <b>Try again</b>\n\n"
-        "Starting with this question. Tap <b>➡️ Next Question</b> to continue with your other mistakes.\n"
-        "Answer correctly and a question leaves your mistakes list."
+        "<b>TRY AGAIN</b>\n\n"
+        "Starting with this question. Tap <b>Next Question</b> to continue with your other mistakes.\n"
+        "A question is removed from your list once you answer it correctly."
     )
     if not summary.has_pro:
         left = summary.trial_tries_left
         intro += (
-            f"\n\n🎁 <i>Free trial: {left} tr{'ies' if left != 1 else 'y'} left — "
-            "each answered question uses one.</i>"
+            f"\n\n<i>Free trial: {left} tr{'ies' if left != 1 else 'y'} left. "
+            "Each answered question uses one.</i>"
         )
     await _start_review(
         message, state, telegram_id, intro=intro, review_question_id=question_id,
@@ -731,92 +823,92 @@ async def explain_mistake(message: Message, telegram_id: int, question_id: str, 
         await message.answer(esc(msg), reply_markup=pro_plan_keyboard() if "PRO" in msg else None)
         return
 
-    divider = "━" * 30
     trial_note = ""
     if not summary.has_pro:
         trial_note = (
-            f"\n\n{divider}\n🎁 <i>That was your free AI explanation. "
-            "Upgrade to 💎 PRO for unlimited AI explanations on every mistake.</i>"
+            "\n\n<i>That was your free AI explanation. "
+            "Upgrade to PRO for unlimited AI explanations on every mistake.</i>"
         )
     await answer_long(
         message,
-        f"🧠 <b>AI Explanation</b>\n{divider}\n\n{esc(explanation.explanation)}{trial_note}",
+        f"<b>AI EXPLANATION</b>\n\n{esc(explanation.explanation)}{trial_note}",
         parse_mode="HTML",
         protect_content=True,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="🔁 Try this question again", callback_data=f"mtry:{question_id}"),
+            InlineKeyboardButton(text="Try this question again", callback_data=f"mtry:{question_id}"),
         ]]),
     )
 
 
 def _format_mistakes_list(data: MistakeListResponse, bot_username: str) -> str:
-    """Summary + numbered wrong questions, each with Try again / Ask AI links."""
-    divider = "━" * 30
-    lines = ["🔁 <b>Review My Mistakes</b>", divider, "📊 <b>Summary</b>"]
-    lines.append(f"You have <b>{data.total}</b> question{'s' if data.total != 1 else ''} to fix.")
+    """Summary + numbered wrong questions, each with Try again / Explain links."""
+    lines = [
+        "<b>REVIEW MY MISTAKES</b>",
+        "",
+        f"Questions to fix: <b>{data.total}</b>",
+    ]
     if data.by_course:
         shown = data.by_course[:5]
-        for c in shown:
-            lines.append(f"• {esc(c.course_name)} — <b>{c.count}</b>")
+        rows = [f"{esc(c.course_name)}: <b>{c.count}</b>" for c in shown]
         hidden = len(data.by_course) - len(shown)
         if hidden > 0:
-            lines.append(f"• <i>+{hidden} more course{'s' if hidden != 1 else ''}</i>")
-    lines.append("<i>Answer a question correctly and it leaves this list.</i>")
+            rows.append(f"<i>{_plural(hidden, 'more course')}</i>")
+        lines.append("<blockquote><b>By course</b>\n" + "\n".join(rows) + "</blockquote>")
+    lines.append("<i>A question is removed from this list once you answer it correctly.</i>")
     if data.is_trial:
         tries, ai = data.trial_tries_left or 0, data.trial_ai_left or 0
         lines.append(
-            f"\n🎁 <b>Free trial:</b> {tries} tr{'ies' if tries != 1 else 'y'} · "
-            f"{ai} AI explanation{'s' if ai != 1 else ''} left"
+            f"\n<b>Free trial:</b> {tries} tr{'ies' if tries != 1 else 'y'} and "
+            f"{_plural(ai, 'AI explanation')} left"
         )
-    lines.append(divider)
 
     base = f"https://t.me/{bot_username}?start="
     start_no = data.page * data.page_size
     for i, item in enumerate(data.items, start=start_no + 1):
         when = item.answered_at.astimezone(LOCAL_TZ).strftime("%b %d")
-        course = f"{esc(item.course_name)} · " if item.course_name else ""
+        meta = f"{esc(item.course_name)}  |  {when}" if item.course_name else when
         try_link = f'{base}{TRY_AGAIN_PREFIX}{item.question_id}'
         ai_link = f'{base}{EXPLAIN_PREFIX}{item.question_id}_{item.your_answer}'
         lines += [
             "",
             f"<b>{i}.</b> {esc(item.prompt)}",
-            f"    <i>{course}{when}</i>",
-            f'    <a href="{try_link}">🔁 Try again</a>   ·   <a href="{ai_link}">🧠 Ask AI</a>',
+            f"<i>{meta}  |  Your answer: {esc(item.your_answer)}</i>",
+            f'<a href="{try_link}">Try again</a>  |  <a href="{ai_link}">Explain with AI</a>',
         ]
 
     if data.is_trial:
-        lines += ["", divider]
+        lines.append("")
         if data.locked_count:
             lines.append(
-                f"🔒 <b>{data.locked_count} more mistake{'s' if data.locked_count != 1 else ''}</b> "
-                "— upgrade to 💎 PRO to see and practise all of them."
+                f"<blockquote>{_plural(data.locked_count, 'more mistake')} not shown. "
+                "Upgrade to PRO to see and practise all of them.</blockquote>"
             )
         else:
-            lines.append("💎 <i>PRO: unlimited tries and AI explanations on every mistake.</i>")
+            lines.append("<i>PRO includes unlimited tries and AI explanations on every mistake.</i>")
         return "\n".join(lines)
 
     pages = max(1, -(-data.total // data.page_size))
-    lines += ["", divider, f"Page <b>{data.page + 1}</b> of <b>{pages}</b>"]
+    lines += ["", f"<i>Page {data.page + 1} of {pages}</i>"]
     return "\n".join(lines)
 
 
 def _mistakes_list_keyboard(data: MistakeListResponse) -> InlineKeyboardMarkup:
     if data.is_trial:
         return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔒 Practice all mistakes · PRO", callback_data="mistakes:start")],
+            [InlineKeyboardButton(text="Practise all mistakes (PRO)", callback_data="mistakes:start")],
             *pro_plan_keyboard().inline_keyboard,
         ])
     rows = []
     nav = []
     if data.page > 0:
-        nav.append(InlineKeyboardButton(text="⬅️ Newer", callback_data=f"mistakes:page:{data.page - 1}"))
+        nav.append(InlineKeyboardButton(text="‹ Newer", callback_data=f"mistakes:page:{data.page - 1}"))
     if data.has_next:
-        nav.append(InlineKeyboardButton(text="Older ➡️", callback_data=f"mistakes:page:{data.page + 1}"))
+        nav.append(InlineKeyboardButton(text="Older ›", callback_data=f"mistakes:page:{data.page + 1}"))
     if nav:
         rows.append(nav)
     practice_n = min(data.total, REVIEW_MISTAKES_LIMIT)
     rows.append([InlineKeyboardButton(
-        text=f"▶️ Practice all mistakes ({practice_n})", callback_data="mistakes:start")])
+        text=f"Practise all mistakes ({practice_n})", callback_data="mistakes:start")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -884,7 +976,7 @@ async def review_mistakes_callback(callback: CallbackQuery, state: FSMContext) -
     await _start_review(
         callback.message, state, callback.from_user.id,
         intro=(
-            f"🔁 <b>Review My Mistakes</b>\n\n"
+            f"<b>REVIEW MY MISTAKES</b>\n\n"
             f"{to_review} question{'s' if to_review != 1 else ''} you got wrong before. "
             "Answer one correctly and it leaves your mistakes list."
         ),
@@ -932,7 +1024,7 @@ async def results_history_callback(callback: CallbackQuery, state: FSMContext) -
     toast = _history_toast(history, range_token)
     await callback.answer(toast)
     await callback.message.answer(
-        f"🔄 <i>{esc(toast)}</i>\n\n" + _format_history(history, range_token),
+        _format_history(history, range_token),
         parse_mode="HTML",
         reply_markup=_history_keyboard(history, range_token),
     )
@@ -946,7 +1038,7 @@ async def results_history_custom_callback(callback: CallbackQuery, state: FSMCon
     await state.set_state(ResultsHistory.entering_dates)
     today = _local_today()
     prompt = await callback.message.answer(
-        "📆 <b>Choose your dates</b>\n\n"
+        "<b>CUSTOM DATES</b>\n\n"
         "Type a date range (day/month/year):\n"
         f"<code>01/{today:%m/%Y} - {today:%d/%m/%Y}</code>\n\n"
         "Or one date to see a single day:\n"
@@ -982,9 +1074,9 @@ async def results_history_dates_entered(message: Message, state: FSMContext) -> 
         # One retry message, then leave the state so other typing isn't treated as dates
         await state.clear()
         await message.answer(
-            f"⚠️ {esc(str(e))}\n\n"
+            f"<b>Invalid date.</b> {esc(str(e))}\n\n"
             "Example: <code>01/10/2026 - 04/11/2026</code>\n"
-            "Tap <b>📆 Custom</b> again to try once more.",
+            "Tap <b>Custom dates</b> to try again.",
             parse_mode="HTML",
             reply_markup=main_menu_keyboard(),
         )
@@ -1003,7 +1095,7 @@ async def results_history_dates_entered(message: Message, state: FSMContext) -> 
         )
         return
     await message.answer(
-        f"🔄 <i>{esc(_history_toast(history, range_token))}</i>\n\n" + _format_history(history, range_token),
+        _format_history(history, range_token),
         parse_mode="HTML",
         reply_markup=_history_keyboard(history, range_token),
     )
