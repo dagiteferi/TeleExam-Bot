@@ -48,10 +48,11 @@ def session_action_keyboard(
     question_id: Optional[str] = None,
     qtoken: Optional[str] = None,
     is_bookmarked: bool = False,
+    end_label: str = "End Session",
 ) -> InlineKeyboardMarkup:
     """
     Generates an inline keyboard for session actions like "Explain with AI",
-    "Next Question", and "End Session".
+    "Next Question", and "End Session" (end_label, e.g. "✅ Finish review").
     """
     buttons = []
 
@@ -81,7 +82,7 @@ def session_action_keyboard(
         # Callback data format: "end_{session_id}"
         buttons.append(
             InlineKeyboardButton(
-                text="End Session", callback_data=f"end_{session_id}"
+                text=end_label, callback_data=f"end_{session_id}"
             )
         )
 

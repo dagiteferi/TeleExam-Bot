@@ -403,6 +403,25 @@ def _format_history(data: HistoryResponse, range_token: str = "all") -> str:
     return "\n".join(lines)
 
 
+def _history_toast(data: HistoryResponse, range_token: str) -> str:
+    """Short pop-up confirming the filter just applied, e.g. '✅ Last 7 days · 📝 Exams — 5 results'."""
+    period = RANGE_PRESETS.get(range_token) or _format_period(data.date_from, data.date_to) or "All time"
+    mode = HISTORY_MODES.get(data.mode, "All")
+    n = data.total
+    toast = f"✅ {period} · {mode} — {n} result{'s' if n != 1 else ''}"
+    if data.page > 0:
+        toast += f" (page {data.page + 1})"
+    return toast[:200]  # Telegram limit for callback answers
+
+
+async def _delete_quietly(message: Message) -> None:
+    """Deletes an old bot message; ignores messages Telegram no longer lets us delete (>48h)."""
+    try:
+        await message.delete()
+    except TelegramBadRequest:
+        pass
+
+
 def _history_keyboard(data: HistoryResponse, range_token: str) -> InlineKeyboardMarkup:
     """
     Buttons: type filter, day filter, custom dates and paging.
@@ -611,9 +630,12 @@ async def _check_mistakes_access(message: Message, telegram_id: int, action: str
 
 async def _start_review(
     message: Message, state: FSMContext, telegram_id: int, intro: str,
-    review_question_id: Optional[str] = None, is_trial: bool = False,
+    review_question_id: Optional[str] = None, is_trial: bool = False, trial_tries_left: int = 0,
 ) -> None:
-    """Starts a Review My Mistakes practice session (all mistakes, or one question) and sends question 1."""
+    """
+    Starts a Review My Mistakes practice session and sends the first question.
+    With review_question_id it starts at that question and continues (Next) through the other mistakes.
+    """
     payload = {"mode": "practice", "review_mistakes": True}
     if review_question_id:
         payload["review_question_id"] = review_question_id
@@ -645,22 +667,40 @@ async def _start_review(
         session_id = res.session_id
         await message.answer(intro, parse_mode="HTML")
 
-    await state.update_data(session_id=session_id, mode="practice")
+    # The answer handler shows the PRO message when the free tries run out in this session.
+    # Tied to the session id so it can't leak into a later normal practice/exam session.
+    await state.update_data(
+        session_id=session_id, mode="practice",
+        review_session=session_id,  # last question shows "✅ Finish review"
+        review_trial_session=session_id if is_trial else None,
+        review_trial_left=trial_tries_left if is_trial else None,
+    )
     await state.set_state(ExamSession.active)
     await send_question(message, state, session_id, telegram_id)
 
 
 async def try_mistake_again(message: Message, state: FSMContext, telegram_id: int, question_id: str) -> None:
-    """Retries one wrong question as a one-question practice; a correct answer removes it from the list."""
+    """
+    Starts at the chosen wrong question, then continues through the other mistakes with
+    ➡️ Next Question. A correct answer removes a question from the list.
+    """
     summary = await _check_mistakes_access(message, telegram_id, "try")
     if not summary:
         return
-    intro = "🔁 <b>Try again</b>\n\nAnswer correctly and this question leaves your mistakes list."
+    intro = (
+        "🔁 <b>Try again</b>\n\n"
+        "Starting with this question. Tap <b>➡️ Next Question</b> to continue with your other mistakes.\n"
+        "Answer correctly and a question leaves your mistakes list."
+    )
     if not summary.has_pro:
-        left = summary.trial_tries_left - 1  # this try uses one
-        intro += f"\n\n🎁 <i>Free trial: {left} tr{'ies' if left != 1 else 'y'} left after this one.</i>"
+        left = summary.trial_tries_left
+        intro += (
+            f"\n\n🎁 <i>Free trial: {left} tr{'ies' if left != 1 else 'y'} left — "
+            "each answered question uses one.</i>"
+        )
     await _start_review(
-        message, state, telegram_id, intro=intro, review_question_id=question_id, is_trial=not summary.has_pro,
+        message, state, telegram_id, intro=intro, review_question_id=question_id,
+        is_trial=not summary.has_pro, trial_tries_left=summary.trial_tries_left or 0,
     )
 
 
@@ -887,15 +927,16 @@ async def results_history_callback(callback: CallbackQuery, state: FSMContext) -
         await callback.message.answer("⏳ Could not load your history right now. Please try again.")
         return
 
-    text = _format_history(history, range_token)
-    keyboard = _history_keyboard(history, range_token)
-    try:
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
-    except TelegramBadRequest as e:
-        if "message is not modified" not in str(e):
-            # e.g. the old message can't be edited any more: send a fresh one
-            await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
-    await callback.answer()
+    # Make the update obvious: a toast naming the filter, the new result as a fresh
+    # message at the bottom, and the old one deleted (Telegram shows a delete animation).
+    toast = _history_toast(history, range_token)
+    await callback.answer(toast)
+    await callback.message.answer(
+        f"🔄 <i>{esc(toast)}</i>\n\n" + _format_history(history, range_token),
+        parse_mode="HTML",
+        reply_markup=_history_keyboard(history, range_token),
+    )
+    await _delete_quietly(callback.message)
 
 
 @router.callback_query(F.data.startswith("histc:"))
@@ -903,9 +944,8 @@ async def results_history_custom_callback(callback: CallbackQuery, state: FSMCon
     """Asks the user to type the days they want to see."""
     mode = callback.data.split(":", 1)[1]
     await state.set_state(ResultsHistory.entering_dates)
-    await state.update_data(history_mode=mode if mode in HISTORY_MODES else "all")
     today = _local_today()
-    await callback.message.answer(
+    prompt = await callback.message.answer(
         "📆 <b>Choose your dates</b>\n\n"
         "Type a date range (day/month/year):\n"
         f"<code>01/{today:%m/%Y} - {today:%d/%m/%Y}</code>\n\n"
@@ -913,6 +953,11 @@ async def results_history_custom_callback(callback: CallbackQuery, state: FSMCon
         f"<code>{today:%d/%m/%Y}</code>\n\n"
         "<i>Send /cancel to go back.</i>",
         parse_mode="HTML",
+    )
+    # Remembered so both are removed once the new result is shown
+    await state.update_data(
+        history_mode=mode if mode in HISTORY_MODES else "all",
+        history_old_msg_ids=[callback.message.message_id, prompt.message_id],
     )
     await callback.answer()
 
@@ -945,7 +990,9 @@ async def results_history_dates_entered(message: Message, state: FSMContext) -> 
         )
         return
 
-    mode = (await state.get_data()).get("history_mode", "all")
+    data = await state.get_data()
+    mode = data.get("history_mode", "all")
+    old_msg_ids = data.get("history_old_msg_ids") or []
     await state.clear()
 
     history, range_token = await _load_history(message.from_user.id, mode, 0, _custom_token(first, last))
@@ -956,7 +1003,13 @@ async def results_history_dates_entered(message: Message, state: FSMContext) -> 
         )
         return
     await message.answer(
-        _format_history(history, range_token),
+        f"🔄 <i>{esc(_history_toast(history, range_token))}</i>\n\n" + _format_history(history, range_token),
         parse_mode="HTML",
         reply_markup=_history_keyboard(history, range_token),
     )
+    # Remove the old history message and the "Choose your dates" prompt (delete animation)
+    for msg_id in old_msg_ids:
+        try:
+            await message.bot.delete_message(message.chat.id, msg_id)
+        except TelegramBadRequest:
+            pass

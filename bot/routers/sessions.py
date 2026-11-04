@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from bot.keyboards.inline import (
     course_selection_keyboard,
     exam_selection_keyboard,
+    pro_plan_keyboard,
     question_choices_keyboard,
     session_action_keyboard,
 )
@@ -646,12 +647,33 @@ async def process_answer_callback(callback: CallbackQuery, state: FSMContext) ->
     )
 
 
+    is_review_trial = bool(session_id) and user_data.get("review_trial_session") == session_id
+
     if not answer_data:
+        if is_review_trial and not user_data.get("review_trial_left"):
+            # Free trial of Review My Mistakes: the free tries are used up
+            await callback.message.answer(
+                "🔒 <b>You've used your 3 free tries.</b>\n\n"
+                "Upgrade to 💎 PRO to keep practising all your mistakes, "
+                "with unlimited tries and AI explanations.",
+                parse_mode="HTML",
+                reply_markup=pro_plan_keyboard(),
+            )
+            return
         await callback.message.answer(
             "Failed to submit answer. Please try again.",
             reply_markup=main_menu_keyboard(),
         )
         return
+
+    trial_note = ""
+    if is_review_trial:
+        left = max(0, (user_data.get("review_trial_left") or 0) - 1)
+        await state.update_data(review_trial_left=left)
+        trial_note = (
+            f"\n\n🎁 <i>Free trial: {left} tr{'ies' if left != 1 else 'y'} left.</i>" if left
+            else "\n\n🔒 <i>That was your last free try — upgrade to 💎 PRO to keep going.</i>"
+        )
 
     # Get the stored options list to display which one was selected
     question_options = user_data.get("question_options", [])
@@ -688,8 +710,9 @@ async def process_answer_callback(callback: CallbackQuery, state: FSMContext) ->
         question_id=question_id,
         qtoken=qtoken if is_practice else None,
         is_bookmarked=user_data.get("is_bookmarked", False),
+        end_label="✅ Finish review" if user_data.get("review_session") == session_id else "End Session",
     )
-    feedback_text = f"{divider}\n{result_block}{explanation_block}"
+    feedback_text = f"{divider}\n{result_block}{explanation_block}{trial_note}"
 
     # Reconstruct the full message to keep question context visible.
     # html_text keeps the original formatting and escapes the question text properly.
