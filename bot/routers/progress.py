@@ -138,6 +138,8 @@ class HistoryResponse(BaseModel):
     total: int
     has_next: bool
     items: list[HistoryItem]
+    is_trial: bool = False  # free preview: newest few results only
+    locked_count: int = 0
 
 
 # Students are in Ethiopia (UTC+3, no daylight saving); show their local time.
@@ -386,6 +388,16 @@ def _format_history(data: HistoryResponse, range_token: str = "all") -> str:
         )
         lines.append(f"    <i>{' · '.join(details)}</i>")
 
+    if data.is_trial:
+        lines += ["", divider, f"🎁 <i>Free preview: your {len(data.items)} newest result"
+                               f"{'s' if len(data.items) != 1 else ''} here.</i>"]
+        if data.locked_count:
+            lines.append(
+                f"🔒 <b>{data.locked_count} more result{'s' if data.locked_count != 1 else ''}</b> "
+                "in this view — upgrade to 💎 PRO to see your full history."
+            )
+        return "\n".join(lines)
+
     pages = max(1, -(-data.total // data.page_size))
     lines += ["", divider, f"Page <b>{data.page + 1}</b> of <b>{pages}</b> · {data.total} results in total"]
     return "\n".join(lines)
@@ -428,6 +440,8 @@ def _history_keyboard(data: HistoryResponse, range_token: str) -> InlineKeyboard
             text="Older ➡️", callback_data=f"hist:{data.mode}:{data.page + 1}:{range_token}"))
     if nav_row:
         rows.append(nav_row)
+    if data.is_trial and data.locked_count:
+        rows += pro_plan_keyboard().inline_keyboard  # free preview: upgrade instead of more pages
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -448,11 +462,13 @@ def _progress_links(data: ProgressResponse) -> tuple[str, InlineKeyboardMarkup]:
         history_text = "📜 Full Results History"
     else:
         lines.append(
-            "\n🎁 <i>Try Review My Mistakes for free: see 3 mistakes, retry 3 questions "
-            "and get 1 AI explanation.</i>\n💎 <i>Full Results History is a PRO feature.</i>"
+            "\n🎁 <b>Free trial</b>\n"
+            "<i>• Review My Mistakes: see 3 mistakes, retry 3 questions, 1 AI explanation\n"
+            "• Results History: your 3 newest results in every view and day filter\n"
+            "💎 PRO unlocks everything.</i>"
         )
         mistakes_text = "🎁 Review My Mistakes · Free trial"
-        history_text = "🔒 Full Results History · PRO"
+        history_text = "🎁 Results History · Free preview"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=mistakes_text, callback_data="mistakes:open")],
@@ -867,12 +883,8 @@ async def results_history_callback(callback: CallbackQuery, state: FSMContext) -
 
     history, range_token = await _load_history(callback.from_user.id, mode, page, range_token)
     if not history:
-        summary = await _get_mistakes_summary(callback.from_user.id)
         await callback.answer()
-        if summary and not summary.has_pro:
-            await _send_pro_upsell(callback.message, "Full Results History")
-        else:
-            await callback.message.answer("⏳ Could not load your history right now. Please try again.")
+        await callback.message.answer("⏳ Could not load your history right now. Please try again.")
         return
 
     text = _format_history(history, range_token)
@@ -938,10 +950,6 @@ async def results_history_dates_entered(message: Message, state: FSMContext) -> 
 
     history, range_token = await _load_history(message.from_user.id, mode, 0, _custom_token(first, last))
     if not history:
-        summary = await _get_mistakes_summary(message.from_user.id)
-        if summary and not summary.has_pro:
-            await _send_pro_upsell(message, "Full Results History")
-            return
         await message.answer(
             "⏳ Could not load your history right now. Please try again later.",
             reply_markup=main_menu_keyboard(),
