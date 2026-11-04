@@ -105,8 +105,8 @@ def _format_study_plan(plan: StudyPlanDetails, department_name: Optional[str] = 
 
     # Weak topics
     for wt in plan.weak_topics:
-        priority_label = f"({esc(wt.focus)} Priority)"
-        lines.append(f"• <b>{esc(wt.topic)}</b> — {wt.errors} errors {priority_label}")
+        focus = wt.focus if "priority" in wt.focus.lower() else f"{wt.focus} Priority"
+        lines.append(f"• <b>{esc(wt.topic)}</b> — {wt.errors} recent errors ({esc(focus)})")
 
     lines += ["", divider, "<b>7-Day Study Plan</b>"]
 

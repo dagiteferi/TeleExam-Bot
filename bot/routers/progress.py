@@ -26,6 +26,8 @@ class CourseProgress(BaseModel):
 class WeakTopic(BaseModel):
     topic_name: str
     error_count: int
+    attempted: int = 0
+    error_rate_percent: float = 0.0
 
 
 class TopExamScore(BaseModel):
@@ -149,7 +151,14 @@ def _format_progress(data: ProgressResponse) -> str:
     if data.weak_topics:
         lines += ["", divider, "⚠️ <b>Topics Requiring Attention</b>"]
         for t in data.weak_topics:
-            lines.append(f"• {esc(t.topic_name)} — <b>{t.error_count}</b> mistakes")
+            if t.attempted:
+                lines.append(
+                    f"• {esc(t.topic_name)} — <b>{t.error_count} of {t.attempted}</b> wrong "
+                    f"({t.error_rate_percent:.0f}%)"
+                )
+            else:  # older backend without the rate fields
+                lines.append(f"• {esc(t.topic_name)} — <b>{t.error_count}</b> mistakes")
+        lines.append("<i>Based on your last answers in each topic — it updates as you improve.</i>")
 
     # Recent History
     if data.recent_sessions:
