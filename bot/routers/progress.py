@@ -9,8 +9,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from pydantic import BaseModel
 
+from bot.keyboards.inline import pro_plan_keyboard
 from bot.keyboards.reply import MAIN_MENU_TEXTS, main_menu_keyboard
-from bot.states.session_states import ResultsHistory
+from bot.routers.sessions import send_question
+from bot.states.session_states import ExamSession, ResultsHistory
 from bot.services.api_client import api_client
 from bot.utils.text import answer_long, esc
 
@@ -71,6 +73,17 @@ class ProgressResponse(BaseModel):
     top_exam_scores: list[TopExamScore] = []
     active_session_info: Optional[ActiveSessionInfo] = None
     recent_sessions: list[RecentSession] = []
+    has_pro: bool = False
+    mistakes_to_review: int = 0
+
+
+class MistakesSummary(BaseModel):
+    has_pro: bool
+    count: int
+
+
+class SessionStartResponse(BaseModel):
+    session_id: str
 
 
 class HistoryItem(BaseModel):
@@ -100,6 +113,7 @@ class HistoryResponse(BaseModel):
 # Students are in Ethiopia (UTC+3, no daylight saving); show their local time.
 LOCAL_TZ = timezone(timedelta(hours=3))
 HISTORY_PAGE_SIZE = 10
+REVIEW_MISTAKES_LIMIT = 20  # must match the backend's limit per review session
 HISTORY_MODES = {"all": "All", "exam": "📝 Exams", "practice": "🎯 Practice"}
 # Quick day filters. A custom range is encoded as "YYYYMMDD-YYYYMMDD".
 RANGE_PRESETS = {
@@ -387,10 +401,49 @@ def _history_keyboard(data: HistoryResponse, range_token: str) -> InlineKeyboard
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _history_link_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📜 View Full Results History", callback_data="hist:all:0:all"),
-    ]])
+def _progress_links(data: ProgressResponse) -> tuple[str, InlineKeyboardMarkup]:
+    """The PRO links shown under the dashboard: Review My Mistakes and Full Results History."""
+    n = data.mistakes_to_review
+    mistakes_line = (
+        f"🔁 <b>Review My Mistakes</b> — practise the <b>{n}</b> question{'s' if n != 1 else ''} you got wrong"
+        if n else "🔁 <b>Review My Mistakes</b> — practise the questions you got wrong"
+    )
+    lines = [
+        "<b>📌 Go further</b>",
+        mistakes_line,
+        "📜 <b>Full Results History</b> — every result, filter by day or date range",
+    ]
+    if data.has_pro:
+        mistakes_text = f"🔁 Review My Mistakes ({n})" if n else "🔁 Review My Mistakes"
+        history_text = "📜 Full Results History"
+    else:
+        lines.append("\n💎 <i>These are PRO features.</i>")
+        mistakes_text = "🔒 Review My Mistakes · PRO"
+        history_text = "🔒 Full Results History · PRO"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=mistakes_text, callback_data="mistakes:start")],
+        [InlineKeyboardButton(text=history_text, callback_data="hist:all:0:all")],
+    ])
+    return "\n".join(lines), keyboard
+
+
+async def _send_pro_upsell(message: Message, feature: str) -> None:
+    await message.answer(
+        f"🔒 <b>{esc(feature)} is a PRO feature.</b>\n\n"
+        "Upgrade to PRO to unlock:\n"
+        "• 🔁 Review My Mistakes — practise only the questions you got wrong\n"
+        "• 📜 Full Results History — with day and date-range filters\n"
+        "• 🤖 Unlimited AI Tutor and personalized study plans",
+        parse_mode="HTML",
+        reply_markup=pro_plan_keyboard(),
+    )
+
+
+async def _get_mistakes_summary(telegram_id: int) -> Optional[MistakesSummary]:
+    return await api_client.get(
+        path="/api/progress/mistakes", telegram_id=telegram_id, response_model=MistakesSummary
+    )
 
 
 async def _load_history(
@@ -457,13 +510,63 @@ async def my_progress_handler(message: Message, state: FSMContext) -> None:
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
     )
-    # Link to the full, time-based results history
-    if progress_data.recent_sessions:
-        await message.answer(
-            "📜 Want to see <b>all</b> your past results, by date?",
+    # Clear links to the PRO features: Review My Mistakes and Full Results History
+    links_text, links_keyboard = _progress_links(progress_data)
+    await message.answer(links_text, parse_mode="HTML", reply_markup=links_keyboard)
+
+
+@router.callback_query(F.data == "mistakes:start")
+async def review_mistakes_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Starts a practice session made of the student's open mistakes (PRO only)."""
+    if not callback.from_user or not callback.message:
+        return
+    await callback.answer()
+
+    summary = await _get_mistakes_summary(callback.from_user.id)
+    if not summary:
+        await callback.message.answer("⏳ Could not load your mistakes right now. Please try again later.")
+        return
+    if not summary.has_pro:
+        await _send_pro_upsell(callback.message, "Review My Mistakes")
+        return
+    if summary.count == 0:
+        await callback.message.answer(
+            "🎉 <b>No mistakes to review!</b>\n\n"
+            "Every question you got wrong has since been answered correctly. "
+            "Keep practising — new mistakes will show up here.",
             parse_mode="HTML",
-            reply_markup=_history_link_keyboard(),
         )
+        return
+
+    res = await api_client.post(
+        path="/api/sessions/start",
+        telegram_id=callback.from_user.id,
+        payload={"mode": "practice", "review_mistakes": True},
+        response_model=SessionStartResponse,
+    )
+    if not res:
+        await callback.message.answer(
+            "Failed to start the review. Please try again later.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    if isinstance(res, dict) and res.get("detail", {}).get("error", {}).get("code") == "active_session_exists":
+        session_id = res["detail"]["error"]["session_id"]
+        await callback.message.answer("You have an unfinished review. Resuming...")
+    else:
+        session_id = res.session_id
+        to_review = min(summary.count, REVIEW_MISTAKES_LIMIT)
+        await callback.message.answer(
+            f"🔁 <b>Review My Mistakes</b>\n\n"
+            f"{to_review} question{'s' if to_review != 1 else ''} you got wrong before. "
+            "Answer one correctly and it leaves your mistakes list.",
+            parse_mode="HTML",
+        )
+
+    await state.update_data(session_id=session_id, mode="practice")
+    await state.set_state(ExamSession.active)
+    await send_question(callback.message, state, session_id, callback.from_user.id)
 
 
 @router.callback_query(F.data.startswith("hist:"))
@@ -485,7 +588,12 @@ async def results_history_callback(callback: CallbackQuery, state: FSMContext) -
 
     history, range_token = await _load_history(callback.from_user.id, mode, page, range_token)
     if not history:
-        await callback.answer("Could not load your history right now. Please try again.", show_alert=True)
+        summary = await _get_mistakes_summary(callback.from_user.id)
+        await callback.answer()
+        if summary and not summary.has_pro:
+            await _send_pro_upsell(callback.message, "Full Results History")
+        else:
+            await callback.message.answer("⏳ Could not load your history right now. Please try again.")
         return
 
     text = _format_history(history, range_token)
@@ -551,6 +659,10 @@ async def results_history_dates_entered(message: Message, state: FSMContext) -> 
 
     history, range_token = await _load_history(message.from_user.id, mode, 0, _custom_token(first, last))
     if not history:
+        summary = await _get_mistakes_summary(message.from_user.id)
+        if summary and not summary.has_pro:
+            await _send_pro_upsell(message, "Full Results History")
+            return
         await message.answer(
             "⏳ Could not load your history right now. Please try again later.",
             reply_markup=main_menu_keyboard(),
