@@ -26,10 +26,23 @@ def embed_watermark(text: str, telegram_id: int) -> str:
     The watermark is inserted after the first character so it's imperceptible.
     """
     watermark = SEPARATOR + _int_to_bits(telegram_id) + SEPARATOR
-    # Insert after the first character to make it harder to strip
-    if len(text) > 1:
-        return text[0] + watermark + text[1:]
-    return watermark + text
+    # Insert after the first visible character to make it harder to strip. Leading
+    # HTML tags (e.g. "<b>") and entities (e.g. "&amp;") are skipped: putting the
+    # watermark inside one breaks the HTML and Telegram rejects the whole message.
+    i = 0
+    while i < len(text) and text[i] == "<":
+        close = text.find(">", i)
+        if close == -1:
+            break
+        i = close + 1
+    if i >= len(text):
+        return watermark + text
+    end = i + 1
+    if text[i] == "&":
+        semi = text.find(";", i, i + 10)
+        if semi != -1:
+            end = semi + 1
+    return text[:end] + watermark + text[end:]
 
 
 def extract_watermark(text: str) -> int | None:
