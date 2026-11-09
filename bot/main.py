@@ -12,6 +12,7 @@ from bot.config import settings
 from bot.middlewares.auto_upsert import AutoUpsertMiddleware
 from bot.middlewares.protect_content import ProtectContentMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
+from bot.middlewares.menu_throttling import MenuThrottlingMiddleware
 from bot.routers.ai_tutor import router as ai_tutor_router, chat_exit_router
 from bot.routers.onboarding import router as onboarding_router
 from bot.routers.progress import router as progress_router
@@ -140,6 +141,7 @@ async def get_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     # One shared instance so profiles refreshed in the background on a message
     # are applied on the next callback too (and vice versa).
     auto_upsert = AutoUpsertMiddleware()
+    dp.message.middleware(MenuThrottlingMiddleware())  # before auto_upsert: ignored repeat taps cost nothing
     dp.message.middleware(auto_upsert)
     dp.callback_query.middleware(ThrottlingMiddleware())
     dp.callback_query.middleware(auto_upsert)
