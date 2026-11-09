@@ -166,15 +166,11 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     if not message.from_user:
         return
 
-    # Check for deep link payloads (e.g., /start expai_... or /start ref_...)
+    # Check for deep link payloads (e.g., /start ref_... or the Review My Mistakes links).
+    # No "/start expai_..." link: it explained whatever question was on screen, even in Exam Mode.
     payload = command.args
     if payload:
-        if payload.startswith("expai_"):
-            qtoken = payload.split("_", 1)[1]
-            from bot.routers.ai_tutor import handle_ai_explanation
-            await handle_ai_explanation(message, state, qtoken, message.from_user.id)
-            return
-        elif payload.startswith(("mt_", "me_")):
+        if payload.startswith(("mt_", "me_")):
             # "Try again" / "Ask AI" links in the Review My Mistakes list
             from bot.routers.progress import handle_mistake_deep_link
             if await handle_mistake_deep_link(message, state, payload):
