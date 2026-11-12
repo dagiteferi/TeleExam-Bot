@@ -217,6 +217,32 @@ async def process_screenshot_upload(message: Message, state: FSMContext) -> None
         await state.set_state(None)
 
 
+@router.message(Payment.uploading_screenshot, F.document.mime_type.startswith("image/"))
+async def reject_image_sent_as_file(message: Message) -> None:
+    """An image sent with 'Send as file' arrives as a document; ask for a normal photo instead."""
+    await message.answer(
+        "⚠️ <b>Please don't send the image as a file</b>\n\n"
+        "Send your receipt screenshot as a normal <b>photo</b>:\n"
+        "tap 📎, choose <b>Gallery</b>, pick the screenshot and send it.\n"
+        "Don't use <b>File</b> or <b>Send as file</b>.\n\n"
+        "<i>To cancel, send /cancel or pick a menu option.</i>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Payment.uploading_screenshot, F.document | F.video | F.animation | F.sticker | F.voice | F.audio)
+async def reject_non_photo_upload(message: Message) -> None:
+    """Receipts must be sent as a photo; PDFs and other files would otherwise be ignored silently."""
+    await message.answer(
+        "❌ <b>Only images are allowed</b>\n\n"
+        "Please send your payment receipt as a <b>photo / screenshot</b>.\n"
+        "PDFs and other files are not accepted.\n\n"
+        "💡 If your bank gave you a PDF, take a screenshot of it and send that.\n\n"
+        "<i>To cancel, send /cancel or pick a menu option.</i>",
+        parse_mode="HTML",
+    )
+
+
 @router.message(Payment.uploading_screenshot, F.text == "/cancel")
 async def cancel_upload(message: Message, state: FSMContext) -> None:
     await state.set_state(None)
