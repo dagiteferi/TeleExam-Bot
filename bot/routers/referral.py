@@ -42,6 +42,9 @@ async def referral_dashboard(message: Message):
     max_invite_years = rules.get("max_invite_years", 1)
     free_courses_pct = round(float(rules.get("free_courses_ratio", 0.25)) * 100)
     courses_per_invite = rules.get("courses_per_invite", 1)
+    max_courses_pct = round(float(rules.get("max_invite_courses_ratio", 1.0)) * 100)
+    lock_newest_year = rules.get("lock_newest_year", True)
+    lock_last_course = rules.get("lock_last_course", True)
     ai_bonus = rules.get("ai_bonus_per_invite", 0)
 
     if years_per_invite > 1:
@@ -54,12 +57,19 @@ async def referral_dashboard(message: Message):
     rule_lines = [
         f"  • <b>Free:</b> oldest {free_years} exam year(s) and {free_courses_pct}% of courses",
         f"  • {year_rule} (up to <b>{max_invite_years}</b> extra year(s) by invites)",
-        f"  • Each invite unlocks <b>{courses_per_invite}</b> more course(s)",
+        f"  • Each invite unlocks <b>{courses_per_invite}</b> more course(s)"
+        + (f" (up to <b>{max_courses_pct}%</b> of courses by invites)" if max_courses_pct < 100 else ""),
     ]
     if ai_bonus > 0:
         rule_lines.append(f"  • +{ai_bonus} free AI explanations per day for each invite")
+    pro_only = []
+    if lock_newest_year:
+        pro_only.append("Newest exam year")
+    if lock_last_course:
+        pro_only.append("last course")
+    pro_label = " &amp; ".join(pro_only + ["full access"])
     rule_lines.append(
-        f"  • 💎 <b>Newest exam year &amp; full access:</b> PRO only — {settings.PRO_PRICE_BIRR} Birr"
+        f"  • 💎 <b>{pro_label[0].upper() + pro_label[1:]}:</b> PRO only — {settings.PRO_PRICE_BIRR} Birr"
     )
 
     journey = (
