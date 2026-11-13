@@ -219,20 +219,16 @@ async def _deliver_batch(bot: Bot, dp: Dispatcher) -> int:
             continue
         _waiting_users.discard(telegram_id)
 
-        reply_markup = None
-        if item.get("has_department"):
-            reply_markup = main_menu_keyboard(MenuState.from_profile(item))
         try:
+            # No reply keyboard: Telegram refuses to edit messages that carry one, and the
+            # user's current menu stays on screen anyway (a stale one is fixed on their next update).
             message = await bot.send_message(
                 telegram_id,
                 announcement_html(item["text"]),
                 parse_mode="HTML",
-                reply_markup=reply_markup,
             )
             # The message id lets the admin edit or delete this copy later.
             sent.append({"delivery_id": delivery_id, "message_id": message.message_id, "version": item.get("version", 1)})
-            if reply_markup:
-                await state.update_data(menu_version=MENU_VERSION)
         except (TelegramForbiddenError, TelegramNotFound, TelegramBadRequest) as e:
             # Blocked the bot, deleted their account or chat not found: retrying won't help.
             failed.append({"delivery_id": delivery_id, "error": str(e)[:500]})
