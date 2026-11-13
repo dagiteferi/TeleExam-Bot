@@ -121,6 +121,82 @@ async def _is_busy_now(state: FSMContext) -> bool:
     return time.time() - last_active < BUSY_TIMEOUT_SECONDS
 
 
+def announcement_html(text: str) -> str:
+    return f"📢 <b>Announcement</b>\n\n{esc(text)}"
+
+
+# Shown instead when Telegram no longer lets the bot delete an old copy (over 48 hours).
+WITHDRAWN_HTML = "📢 <i>This announcement was withdrawn.</i>"
+
+
+def _permanent(e: Exception) -> bool:
+    """Errors where retrying the same edit / delete can never work."""
+    return isinstance(e, (TelegramForbiddenError, TelegramNotFound, TelegramBadRequest))
+
+
+async def _sync_batch(bot: Bot) -> int:
+    """
+    Applies admin edits and deletes to copies already in users' chats.
+    Returns how many tasks were handled.
+    """
+    tasks = await api_client.get(
+        path=f"/api/announcements/sync?limit={ANNOUNCEMENT_BATCH}",
+        telegram_id=bot.id,
+        timeout=30,
+    )
+    if not tasks:
+        return 0
+
+    edited, deleted, deferred, failed = [], [], [], []
+    for task in tasks:
+        delivery_id = task["delivery_id"]
+        chat_id = int(task["telegram_id"])
+        message_id = int(task["message_id"])
+        try:
+            if task["action"] == "edit":
+                try:
+                    await bot.edit_message_text(
+                        announcement_html(task["text"]), chat_id=chat_id, message_id=message_id, parse_mode="HTML"
+                    )
+                except TelegramBadRequest as e:
+                    if "not modified" not in str(e).lower():
+                        raise
+                edited.append({"delivery_id": delivery_id, "version": task["version"]})
+            else:
+                try:
+                    await bot.delete_message(chat_id, message_id)
+                except TelegramBadRequest as e:
+                    if "not found" in str(e).lower():
+                        pass  # the user already deleted it
+                    else:
+                        # Too old to delete (Telegram allows 48 hours): blank it out instead.
+                        await bot.edit_message_text(
+                            WITHDRAWN_HTML, chat_id=chat_id, message_id=message_id, parse_mode="HTML"
+                        )
+                deleted.append(delivery_id)
+        except TelegramRetryAfter as e:
+            deferred.append(delivery_id)
+            await asyncio.sleep(e.retry_after)
+        except Exception as e:
+            if _permanent(e):
+                failed.append(
+                    {"delivery_id": delivery_id, "action": task["action"], "version": task["version"], "error": str(e)[:500]}
+                )
+            else:
+                logging.warning(f"Announcement {task['action']} for {chat_id} failed, will retry: {e}")
+                deferred.append(delivery_id)
+        await asyncio.sleep(SEND_INTERVAL_SECONDS)
+
+    await api_client.post(
+        path="/api/announcements/sync/report",
+        telegram_id=bot.id,
+        payload={"edited": edited, "deleted": deleted, "deferred": deferred, "failed": failed},
+        timeout=30,
+    )
+    # Deferred ones don't count, so temporary errors don't keep the loop spinning.
+    return len(tasks) - len(deferred)
+
+
 async def _deliver_batch(bot: Bot, dp: Dispatcher) -> int:
     """Sends one batch of pending announcements; returns how many were sent."""
     pending = await api_client.get(
@@ -147,13 +223,14 @@ async def _deliver_batch(bot: Bot, dp: Dispatcher) -> int:
         if item.get("has_department"):
             reply_markup = main_menu_keyboard(MenuState.from_profile(item))
         try:
-            await bot.send_message(
+            message = await bot.send_message(
                 telegram_id,
-                f"📢 <b>Announcement</b>\n\n{esc(item['text'])}",
+                announcement_html(item["text"]),
                 parse_mode="HTML",
                 reply_markup=reply_markup,
             )
-            sent.append(delivery_id)
+            # The message id lets the admin edit or delete this copy later.
+            sent.append({"delivery_id": delivery_id, "message_id": message.message_id, "version": item.get("version", 1)})
             if reply_markup:
                 await state.update_data(menu_version=MENU_VERSION)
         except (TelegramForbiddenError, TelegramNotFound, TelegramBadRequest) as e:
@@ -170,14 +247,17 @@ async def _deliver_batch(bot: Bot, dp: Dispatcher) -> int:
     await api_client.post(
         path="/api/announcements/deliveries/report",
         telegram_id=bot.id,
-        payload={"sent": sent, "deferred": deferred, "failed": failed},
+        payload={"sent_messages": sent, "deferred": deferred, "failed": failed},
         timeout=30,
     )
     return len(sent)
 
 
 async def run_announcement_sender(bot: Bot, dp: Dispatcher) -> None:
-    """Background loop that delivers admin announcements, never interrupting busy users."""
+    """
+    Background loop that delivers admin announcements, never interrupting busy users,
+    and applies the admin's edits and deletes to copies already delivered.
+    """
     while True:
         try:
             sent = await _deliver_batch(bot, dp)
@@ -186,6 +266,12 @@ async def run_announcement_sender(bot: Bot, dp: Dispatcher) -> None:
         except Exception:
             logging.exception("Announcement sender error")
             sent = 0
+        try:
+            sent += await _sync_batch(bot)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.exception("Announcement edit/delete error")
         # Keep going straight away while a large announcement is still being sent;
         # otherwise wait for the next check or a wake-up (new announcement, idle user).
         if sent >= ANNOUNCEMENT_BATCH // 2:
