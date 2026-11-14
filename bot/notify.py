@@ -16,6 +16,7 @@ from bot.middlewares.auto_upsert import profile_from_response
 from bot.middlewares.protect_content import save_recording_flag
 from bot.services.api_client import api_client
 from bot.states.session_states import AIInteraction, is_busy
+from bot.utils.announcement_format import format_announcement
 from bot.utils.text import esc
 
 
@@ -121,8 +122,13 @@ async def _is_busy_now(state: FSMContext) -> bool:
     return time.time() - last_active < BUSY_TIMEOUT_SECONDS
 
 
-def announcement_html(text: str) -> str:
-    return f"📢 <b>Announcement</b>\n\n{esc(text)}"
+def announcement_html(text: str, formatted: bool = True) -> str:
+    body = format_announcement(text) if formatted else esc(text)
+    return f"📢 <b>Announcement</b>\n\n{body}"
+
+
+def _bad_formatting(e: Exception) -> bool:
+    return isinstance(e, TelegramBadRequest) and "can't parse entities" in str(e).lower()
 
 
 # Shown instead when Telegram no longer lets the bot delete an old copy (over 48 hours).
@@ -155,9 +161,18 @@ async def _sync_batch(bot: Bot) -> int:
         try:
             if task["action"] == "edit":
                 try:
-                    await bot.edit_message_text(
-                        announcement_html(task["text"]), chat_id=chat_id, message_id=message_id, parse_mode="HTML"
-                    )
+                    try:
+                        await bot.edit_message_text(
+                            announcement_html(task["text"]), chat_id=chat_id, message_id=message_id, parse_mode="HTML"
+                        )
+                    except TelegramBadRequest as e:
+                        if not _bad_formatting(e):
+                            raise
+                        # Telegram refused the formatting: send the text without it rather than fail.
+                        await bot.edit_message_text(
+                            announcement_html(task["text"], formatted=False),
+                            chat_id=chat_id, message_id=message_id, parse_mode="HTML",
+                        )
                 except TelegramBadRequest as e:
                     if "not modified" not in str(e).lower():
                         raise
@@ -222,11 +237,21 @@ async def _deliver_batch(bot: Bot, dp: Dispatcher) -> int:
         try:
             # No reply keyboard: Telegram refuses to edit messages that carry one, and the
             # user's current menu stays on screen anyway (a stale one is fixed on their next update).
-            message = await bot.send_message(
-                telegram_id,
-                announcement_html(item["text"]),
-                parse_mode="HTML",
-            )
+            try:
+                message = await bot.send_message(
+                    telegram_id,
+                    announcement_html(item["text"]),
+                    parse_mode="HTML",
+                )
+            except TelegramBadRequest as e:
+                if not _bad_formatting(e):
+                    raise
+                # Telegram refused the formatting: send the text without it rather than fail.
+                message = await bot.send_message(
+                    telegram_id,
+                    announcement_html(item["text"], formatted=False),
+                    parse_mode="HTML",
+                )
             # The message id lets the admin edit or delete this copy later.
             sent.append({"delivery_id": delivery_id, "message_id": message.message_id, "version": item.get("version", 1)})
         except (TelegramForbiddenError, TelegramNotFound, TelegramBadRequest) as e:
