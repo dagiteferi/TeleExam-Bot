@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     PRO_PRICE_BIRR: int = Field(..., description="Price of PRO in Birr, shown in every upgrade message")
     DUAL_DEPT_PRICE_BIRR: int = Field(..., description="Extra fee to unlock a second department for dual-degree students")
 
+    COMMUNITY_TELEGRAM_URL: str = Field(
+        "https://t.me/TeleExamAI",
+        description="Telegram link suggested (optionally) at the end of onboarding",
+    )
+    COMMUNITY_TIKTOK_URL: str = Field(
+        "https://www.tiktok.com/@teleexamai",
+        description="TikTok link suggested (optionally) at the end of onboarding",
+    )
+
     ENVIRONMENT: str = Field("development", description="Environment mode: 'development' or 'production'")
     REDIS_URL: Optional[str] = Field(None, description="Prod Redis URL for FSM storage.")
     DEV_REDIS_URL: str = Field("redis://localhost:6379/1", description="Dev Redis URL for FSM storage fallback.")

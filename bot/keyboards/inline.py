@@ -126,6 +126,16 @@ def department_confirmation_keyboard(dept_id: str) -> InlineKeyboardMarkup:
     ])
 
 
+def community_links_keyboard() -> InlineKeyboardMarkup:
+    """Optional Telegram / TikTok links shown at the end of onboarding."""
+    rows = []
+    if settings.COMMUNITY_TELEGRAM_URL:
+        rows.append([InlineKeyboardButton(text="📢 Join us on Telegram", url=settings.COMMUNITY_TELEGRAM_URL)])
+    if settings.COMMUNITY_TIKTOK_URL:
+        rows.append([InlineKeyboardButton(text="🎵 Follow us on TikTok", url=settings.COMMUNITY_TIKTOK_URL)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def dual_department_confirmation_keyboard(dept_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Confirm", callback_data=f"confirm_dual_dept_{dept_id}")],

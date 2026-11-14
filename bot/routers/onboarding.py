@@ -7,7 +7,11 @@ from aiogram.filters import CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, User
 
-from bot.keyboards.inline import department_confirmation_keyboard, department_selection_keyboard
+from bot.keyboards.inline import (
+    community_links_keyboard,
+    department_confirmation_keyboard,
+    department_selection_keyboard,
+)
 from bot.keyboards.reply import main_menu_keyboard
 from bot.middlewares.auto_upsert import profile_from_response
 from bot.services.api_client import api_client
@@ -400,3 +404,19 @@ async def process_department_confirmation(callback: CallbackQuery, state: FSMCon
         "Please use the menu below to navigate.",
         reply_markup=main_menu_keyboard(),
     )
+
+    # Optional: invite the user to our channels. Not required to use the bot.
+    community_keyboard = community_links_keyboard()
+    if community_keyboard.inline_keyboard:
+        await callback.message.answer(
+            "<b>Stay connected with TeleExamAI!</b>\n\n"
+            "Want more Exit Exam tips, preparation techniques, student experiences, "
+            "and important exam updates?\n\n"
+            "Follow our channels and stay prepared!\n\n"
+            "📢 <b>Telegram:</b> Get exam updates and announcements.\n"
+            "🎵 <b>TikTok:</b> Watch preparation tips and useful content.\n\n"
+            "You can continue using TeleExamAI without joining either channel.",
+            parse_mode="HTML",
+            reply_markup=community_keyboard,
+            disable_web_page_preview=True,
+        )
