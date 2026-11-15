@@ -182,6 +182,47 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
         elif payload.startswith("ref_"):
             ref_code = payload.split("_", 1)[1]
             await state.update_data(temp_ref_code=ref_code)
+        elif payload.startswith("promo_"):
+            promo_code = payload.split("_", 1)[1]
+            try:
+                promo = await api_client.get(
+                    path=f"/api/promo-referral/{promo_code}",
+                    telegram_id=message.from_user.id,
+                )
+            except Exception:
+                promo = None
+            if promo and promo.get("is_active"):
+                referrer_name = promo.get("referrer_name", "a friend")
+                referrer_username = promo.get("referrer_username")
+                ref_display = f"@{esc(referrer_username)}" if referrer_username else esc(referrer_name)
+                starter = message.from_user
+                starter_name = " ".join(
+                    part for part in (starter.first_name, starter.last_name) if part
+                ) or starter.full_name or "there"
+                welcome_msg = (promo.get("welcome_message") or "").strip()
+                default_offer = (
+                    "You'll get a special offer! Start exploring and make your "
+                    "Exit Exam preparation more effective with TeleExamAI!"
+                )
+                offer = (
+                    "You're eligible for an exclusive offer through this invitation.\n\n"
+                    "Start exploring TeleExamAI and make your Exit Exam preparation more effective!"
+                )
+                if welcome_msg and welcome_msg != default_offer:
+                    offer = esc(welcome_msg)
+
+                await message.answer(
+                    f"<b>Welcome to TeleExamAI, {esc(starter_name)}!</b>\n"
+                    "We're glad to have you here!\n\n"
+                    f"🤝 You joined TeleExamAI through a special invitation from {ref_display}\n"
+                    "🎁 <b>A Special Offer Awaits You!</b>\n"
+                    f"{offer}",
+                    parse_mode="HTML",
+                )
+                # Store the referrer's invite_code so normal referral credit works
+                ref_code_from_promo = promo.get("ref_code")
+                if ref_code_from_promo:
+                    await state.update_data(temp_ref_code=ref_code_from_promo)
 
     # AutoUpsertMiddleware normally has the user's department in state already.
     user_data = await state.get_data()

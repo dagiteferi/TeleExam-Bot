@@ -88,7 +88,7 @@ class AutoUpsertMiddleware(BaseMiddleware):
 
         # Apply a profile fetched in the background during a previous update.
         updates: Dict[str, Any] = self._pending_profiles.pop(user.id, None) or {}
-        payload = self._build_payload(user, event)
+        payload = await self._build_payload(user, event)
 
         if user_state.get("department_id") or updates.get("department_id"):
             if time.time() - user_state.get("_last_upsert", 0) >= REFRESH_INTERVAL_SECONDS:
@@ -164,16 +164,26 @@ class AutoUpsertMiddleware(BaseMiddleware):
             self._pending_profiles[telegram_id] = profile_from_response(user_response)
 
     @staticmethod
-    def _build_payload(user: User, event: TelegramObject) -> Dict[str, Any]:
+    async def _build_payload(user: User, event: TelegramObject) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "telegram_id": user.id,
             "telegram_username": user.username,
             "first_name": user.first_name,
             "last_name": user.last_name,
         }
-        # Referral code from a /start ref_XXXX deep link (only applied to new users by the backend).
+        # Referral code from a /start deep link. A promo link is resolved to the
+        # referrer's invite code so the first upsert can credit them.
         if isinstance(event, Message) and event.text and event.text.startswith("/start"):
             start_payload = event.text.split(" ", 1)
-            if len(start_payload) > 1 and start_payload[1].startswith("ref_"):
-                payload["ref_code"] = start_payload[1].split("ref_", 1)[1]
+            arg = start_payload[1] if len(start_payload) > 1 else ""
+            if arg.startswith("ref_"):
+                payload["ref_code"] = arg.split("ref_", 1)[1]
+            elif arg.startswith("promo_"):
+                promo_code = arg.split("promo_", 1)[1].split()[0]
+                promo = await api_client.get(
+                    path=f"/api/promo-referral/{promo_code}?count=false",
+                    telegram_id=user.id,
+                )
+                if promo and promo.get("is_active") and promo.get("ref_code"):
+                    payload["ref_code"] = promo["ref_code"]
         return payload
