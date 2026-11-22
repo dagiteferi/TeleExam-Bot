@@ -11,18 +11,23 @@ from bot.config import settings
 from bot.main import get_bot_and_dispatcher
 from bot.notify import make_notify_handler, make_wake_handler, run_announcement_sender
 from bot.services.api_client import api_client
+from bot.webhook_guard import guard_webhook
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
+
+
+def build_webhook_url() -> str:
+    base_url = str(settings.BOT_PUBLIC_URL).rstrip("/")
+    path = settings.WEBHOOK_PATH.lstrip("/")
+    return f"{base_url}/{path}"
 
 
 async def on_startup_webhook(dispatcher: Dispatcher, bot: Bot) -> None:
     """
     Sets up the webhook URL for the Telegram bot on startup.
     """
-    base_url = str(settings.BOT_PUBLIC_URL).rstrip("/")
-    path = settings.WEBHOOK_PATH.lstrip("/")
-    webhook_url = f"{base_url}/{path}"
+    webhook_url = build_webhook_url()
     logging.info(f"Setting webhook to: {webhook_url}")
     await bot.set_webhook(webhook_url, secret_token=settings.WEBHOOK_SECRET)
     logging.info("Webhook set successfully.")
@@ -49,6 +54,10 @@ async def keep_awake() -> None:
                         logging.warning("Keep-awake ping to %s returned %s", url, response.status)
             except Exception as e:
                 logging.warning("Keep-awake ping to %s failed: %s", url, e)
+
+
+async def health(request: web.Request) -> web.Response:
+    return web.json_response({"status": "ok", "webhook_guard": bool(settings.BOT_PUBLIC_URL)})
 
 
 async def on_shutdown_webhook(dispatcher: Dispatcher, bot: Bot) -> None:
@@ -89,7 +98,7 @@ async def start_webhook_server() -> None:
     webhook_requests_handler.register(app, path=settings.WEBHOOK_PATH)
 
     # Uptime pingers hit this so Render's free tier doesn't put the bot to sleep
-    app.router.add_get("/health", lambda request: web.json_response({"status": "ok"}))
+    app.router.add_get("/health", health)
 
     # Backend → bot relay for admin notifications (payment approved/rejected, etc.)
     app.router.add_post("/internal/notify", make_notify_handler(bot, dp))
@@ -104,6 +113,10 @@ async def start_webhook_server() -> None:
     site = web.TCPSite(runner, settings.HOST, settings.PORT)
     logging.info(f"Starting webhook server on {settings.HOST}:{settings.PORT}")
     await site.start()
+    if settings.BOT_PUBLIC_URL:
+        guard_task = asyncio.create_task(  # noqa: F841 (keep a reference)
+            guard_webhook(bot, build_webhook_url(), settings.WEBHOOK_SECRET)
+        )
 
     # Keep the server running indefinitely
     # This prevents the main asyncio loop from exiting
