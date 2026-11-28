@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
 from aiogram import F, Router
@@ -131,16 +132,142 @@ async def upgrade_to_pro_menu(message: Message, state: FSMContext) -> None:
     await _send_payment_info(message, message.from_user.id)
 
 
-@router.callback_query(F.data == "upload_payment_screenshot")
-async def start_upload_screenshot(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+# Receipts bigger than this are refused before download (the backend enforces the same cap).
+MAX_RECEIPT_BYTES = 5 * 1024 * 1024
+# Uploading goes Telegram -> bot -> backend -> Supabase; the default 15 s is too short on a slow day.
+UPLOAD_TIMEOUT_SECONDS = 60
+
+
+async def _ask_for_receipt_photo(message: Message, state: FSMContext, intro: str = "") -> None:
     await state.set_state(Payment.uploading_screenshot)
-    await callback.message.answer(
+    await message.answer(
+        f"{intro}"
         "📸 <b>Upload Screenshot</b>\n\n"
         "Please send the photo/screenshot of your payment transfer now.\n\n"
         "<i>To cancel, send /cancel or pick a menu option.</i>",
         parse_mode="HTML",
     )
+
+
+def _submitted_at(pending: dict) -> str:
+    """'Nov 28, 18:15' in Ethiopian time (UTC+3), from the request's created_at."""
+    try:
+        created = datetime.fromisoformat(str(pending.get("created_at")).replace("Z", "+00:00"))
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        return created.astimezone(timezone(timedelta(hours=3))).strftime("%b %d, %H:%M")
+    except (TypeError, ValueError):
+        return "earlier"
+
+
+async def _show_pending_notice(message: Message, pending: dict) -> None:
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Cancel it & send a new receipt", callback_data=f"pay_cancel:{pending['id']}")],
+        [InlineKeyboardButton(text="⏳ Keep waiting", callback_data="pay_keep_waiting")],
+    ])
+    await message.answer(
+        "⏳ <b>Your previous payment is still being reviewed</b>\n\n"
+        f"We received your receipt on <b>{_submitted_at(pending)}</b> and an admin will check it soon. "
+        "You'll get a message here as soon as it is approved.\n\n"
+        "If you sent the wrong screenshot, you can cancel it and send a new one.",
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+
+
+@router.callback_query(F.data == "upload_payment_screenshot")
+async def start_upload_screenshot(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    if not callback.from_user:
+        return
+    payment_kind = (await state.get_data()).get("payment_kind") or "pro"
+
+    # Ask the backend first so nothing is uploaded when it would be refused anyway.
+    check = await api_client.post(
+        path="/api/payments/check",
+        telegram_id=callback.from_user.id,
+        payload={"kind": payment_kind},
+    )
+    status = (check or {}).get("status")
+
+    if status == "ok":
+        await _ask_for_receipt_photo(callback.message, state)
+    elif status == "pending_exists" and check.get("pending"):
+        await state.set_state(None)
+        await _show_pending_notice(callback.message, check["pending"])
+    elif status in ("limit_reached", "not_allowed"):
+        await state.set_state(None)
+        await callback.message.answer(
+            f"⚠️ {esc(check.get('message') or 'You cannot upload a receipt right now.')}",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(),
+        )
+    else:
+        await callback.message.answer(
+            "❌ We couldn't start the upload right now. Please try again in a moment.",
+            reply_markup=main_menu_keyboard(),
+        )
+
+
+@router.callback_query(F.data.startswith("pay_cancel:"))
+async def cancel_pending_and_reupload(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    if not callback.from_user:
+        return
+    request_id = callback.data.split(":", 1)[1]
+    res = await api_client.post(
+        path=f"/api/payments/requests/{request_id}/cancel",
+        telegram_id=callback.from_user.id,
+        payload={},
+    )
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    if not res:
+        # Already approved / rejected meanwhile, or a backend error
+        await callback.message.answer(
+            "⚠️ This payment can no longer be cancelled — it may already have been reviewed. "
+            "Check your messages for the admin's decision.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+    if res.get("kind"):
+        await state.update_data(payment_kind=res["kind"])
+    await _ask_for_receipt_photo(callback.message, state, intro="🗑 Your previous receipt was cancelled.\n\n")
+
+
+@router.callback_query(F.data == "pay_keep_waiting")
+async def keep_waiting(callback: CallbackQuery) -> None:
+    await callback.answer()
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await callback.message.answer(
+        "👍 No problem — we'll message you here as soon as your payment is reviewed.",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+async def _receipt_reached_backend(telegram_id: int, payment_kind: str) -> bool:
+    """After a failed/timed-out upload: did the backend save it anyway (pending, made in the last 5 min)?"""
+    pending = await api_client.get(path="/api/payments/pending", telegram_id=telegram_id)
+    if not pending:
+        return False
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+    for req in pending:
+        if req.get("kind") != payment_kind:
+            continue
+        try:
+            created = datetime.fromisoformat(str(req.get("created_at")).replace("Z", "+00:00"))
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if created >= cutoff:
+            return True
+    return False
 
 
 @router.message(Payment.uploading_screenshot, F.photo)
@@ -151,6 +278,16 @@ async def process_screenshot_upload(message: Message, state: FSMContext) -> None
     # Get the highest resolution photo
     photo = message.photo[-1]
     bot = message.bot
+
+    # Leave the upload state at once: extra photos (an album, repeated taps) must not start more uploads.
+    await state.set_state(None)
+
+    if photo.file_size and photo.file_size > MAX_RECEIPT_BYTES:
+        await message.answer(
+            "❌ That image is too large. Please send a normal screenshot of your receipt.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
 
     await message.answer("⏳ Uploading your payment receipt, please wait...")
 
@@ -176,10 +313,15 @@ async def process_screenshot_upload(message: Message, state: FSMContext) -> None
             path="/api/payments/submit",
             telegram_id=message.from_user.id,
             form_data=form_data,
+            timeout=UPLOAD_TIMEOUT_SECONDS,
         )
 
+        # A timeout doesn't mean it failed: the backend may have saved it. Never tell the user
+        # to "try again" in that case, it is what used to create duplicate receipts.
+        if not res and await _receipt_reached_backend(message.from_user.id, payment_kind):
+            res = True
+
         if res:
-            await state.set_state(None)
             if payment_kind == "dual_department":
                 success_text = (
                     "✅ <b>Payment Receipt Received!</b>\n\n"
@@ -200,11 +342,11 @@ async def process_screenshot_upload(message: Message, state: FSMContext) -> None
         else:
             await message.answer(
                 "❌ <b>Upload Failed</b>\n\n"
-                "There was an issue submitting your payment receipt. Please try again.",
+                "There was an issue submitting your payment receipt. "
+                "Please tap <b>📸 Upload Receipt Screenshot</b> again.",
                 parse_mode="HTML",
                 reply_markup=main_menu_keyboard(),
             )
-            await state.set_state(None)
     except UserBannedError:
         await state.set_state(None)
         raise
